@@ -768,6 +768,64 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
   z-index: 40;
 }
 
+/* 弹出动画：从贴向单元格的那条边轻微放大 + 淡入（只在卡片上做，
+   避免 transform 影响锚点被测量出来的尺寸） */
+.cell-bubble-anchor .cell-bubble {
+  transform-origin: 50% 0;
+  animation: bubble-pop-down 150ms cubic-bezier(.2, .85, .3, 1.05);
+}
+
+.cell-bubble-anchor.is-above .cell-bubble {
+  transform-origin: 50% 100%;
+  animation-name: bubble-pop-up;
+}
+
+.cell-bubble-anchor .cell-bubble-arrow {
+  animation: bubble-arrow-in 150ms ease-out;
+}
+
+@keyframes bubble-pop-down {
+  from { opacity: 0; transform: translateY(-5px) scale(.97); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes bubble-pop-up {
+  from { opacity: 0; transform: translateY(5px) scale(.97); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes bubble-arrow-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 单元格上的黄色提示：像打了一束聚光灯，指完就淡回编辑态底色 */
+table.grid td.is-editing.is-bubble {
+  animation: bubble-cell-flash 720ms ease-out;
+}
+
+@keyframes bubble-cell-flash {
+  0% {
+    background: light-dark(#fde68a, #4d3f14);
+    box-shadow: inset 0 0 0 2px light-dark(#f59e0b, #d9a521);
+  }
+  55% {
+    background: light-dark(#fef3c7, #3a3218);
+    box-shadow: inset 0 0 0 1px light-dark(#f59e0b, #d9a521);
+  }
+  100% {
+    background: var(--field);
+    box-shadow: none;
+  }
+}
+
+/* 系统开了「减弱动态效果」就不做动画 */
+@media (prefers-reduced-motion: reduce) {
+  .cell-bubble-anchor .cell-bubble,
+  .cell-bubble-anchor .cell-bubble-arrow,
+  table.grid td.is-editing.is-bubble { animation: none; }
+}
+
 .cell-bubble-arrow {
   position: absolute;
   width: 10px;

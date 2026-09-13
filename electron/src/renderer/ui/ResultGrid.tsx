@@ -683,6 +683,8 @@ export function ResultGrid(props: ResultGridProps) {
                     isNumericType(columns[cellIndex]?.type) ? "is-num" : "",
                     cell === null ? "is-null" : "",
                     isEditing ? "is-editing" : "",
+                    /* 气泡编辑：单元格闪一下黄，指出气泡指向哪一格 */
+                    isEditing && bubbleMode ? "is-bubble" : "",
                     /* 整列选中：选中的列深蓝，其他列不加底色 */
                     colMode && inRange ? "is-col-selected" : "",
                     /* 框选 / 整行选中：范围内都是深蓝（整列选中由上面那条接管） */
