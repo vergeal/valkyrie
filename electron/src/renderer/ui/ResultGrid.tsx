@@ -201,25 +201,26 @@ export function ResultGrid(props: ResultGridProps) {
 
     const place = () => {
       const anchor = wrapRef.current?.querySelector("td.is-editing")?.getBoundingClientRect();
-      const box = bubbleRef.current?.getBoundingClientRect();
 
-      if (!anchor || !box)
+      if (!anchor)
         return;
 
-      const height = box.height;
-      const spaceBelow = window.innerHeight - anchor.bottom;
-      const placement = spaceBelow >= height + 14 ? "below" : "above";
-      const top = placement === "below"
-        ? anchor.bottom + 8
-        : Math.max(8, anchor.top - height - 8);
-      const left = Math.min(Math.max(8, anchor.left), Math.max(8, window.innerWidth - box.width - 8));
-      /* 箭头对准单元格中心，同时夹在气泡内部（别顶到圆角上） */
-      const arrow = Math.round(Math.min(
-        Math.max(16, anchor.left + anchor.width / 2 - left - 5),
-        Math.max(16, box.width - 26)
-      ));
+      /* 首帧还量不到气泡自己，先用打开时的尺寸兜底 */
+      const box = bubbleRef.current?.getBoundingClientRect();
+      const size = {
+        width: box?.width ?? bubbleSize?.width ?? 340,
+        height: box?.height ?? bubbleSize?.height ?? 200
+      };
+      const next = placeBubble(anchor, size);
 
-      setBubblePos({ top: Math.round(top), left: Math.round(left), arrow, placement });
+      /* 位置没变就不写 state，免得和 ResizeObserver 互相触发 */
+      setBubblePos(previous => previous
+        && previous.top === next.top
+        && previous.left === next.left
+        && previous.arrow === next.arrow
+        && previous.placement === next.placement
+          ? previous
+          : next);
     };
 
     place();
@@ -239,7 +240,42 @@ export function ResultGrid(props: ResultGridProps) {
       window.removeEventListener("scroll", place, true);
       window.removeEventListener("resize", place);
     };
-  }, [bubbleEdit, editing]);
+  }, [bubbleEdit, editing, bubbleSize]);
+
+  interface BubblePos {
+    top: number;
+    left: number;
+    arrow: number;
+    placement: "below" | "above";
+  }
+
+  /** 由单元格矩形 + 气泡尺寸算位置：下方放不下翻到上方，左右夹窗口内，箭头对准单元格中心 */
+  function placeBubble(anchor: DOMRect, size: { width: number; height: number }): BubblePos {
+    const spaceBelow = window.innerHeight - anchor.bottom;
+    const placement: BubblePos["placement"] = spaceBelow >= size.height + 14 ? "below" : "above";
+    const top = placement === "below"
+      ? anchor.bottom + 8
+      : Math.max(8, anchor.top - size.height - 8);
+    const left = Math.min(Math.max(8, anchor.left), Math.max(8, window.innerWidth - size.width - 8));
+    /* 箭头对准单元格中心，同时夹在气泡内部（别顶到圆角上） */
+    const arrow = Math.round(Math.min(
+      Math.max(16, anchor.left + anchor.width / 2 - left - 5),
+      Math.max(16, size.width - 26)
+    ));
+
+    return { top: Math.round(top), left: Math.round(left), arrow, placement };
+  }
+
+  /* 打开多行气泡：尺寸与位置立刻算好，不用等气泡渲染出来（否则首帧没得量） */
+  function openBubble(value: string, cell?: HTMLElement) {
+    const rect = cell?.getBoundingClientRect()
+      ?? wrapRef.current?.querySelector("td.is-editing")?.getBoundingClientRect();
+    const size = bubbleSizeFor(value, rect?.width);
+
+    setBubbleEdit(true);
+    setBubbleSize(size);
+    setBubblePos(rect ? placeBubble(rect, size) : null);
+  }
 
   /** 气泡的初始尺寸：宽度跟单元格走，高度按行数估一个合适值（之后用户可自由缩放） */
   function bubbleSizeFor(value: string, cellWidth?: number) {
@@ -386,11 +422,12 @@ export function ResultGrid(props: ResultGridProps) {
     committing.current = false;
     setEditing(cell);
     setDraft(value);
+
     /* 含换行的文本用气泡里的多行编辑器 */
-    setBubbleEdit(multiline);
-    setBubbleSize(multiline
-      ? bubbleSizeFor(value, cellElement?.getBoundingClientRect().width)
-      : null);
+    if (multiline)
+      openBubble(value, cellElement);
+    else
+      setBubbleEdit(false);
   }
 
   function commitEdit() {
@@ -420,6 +457,10 @@ export function ResultGrid(props: ResultGridProps) {
   /* 气泡编辑时点空白处提交，行为与单元格内联输入框的失焦提交一致 */
   const commitRef = useRef(commitEdit);
   commitRef.current = commitEdit;
+
+  /* 内联输入框失焦提交要用 ref 判断：切到气泡那一次渲染后输入框会卸载 */
+  const bubbleEditRef = useRef(false);
+  bubbleEditRef.current = bubbleEdit;
 
   useEffect(() => {
     if (!bubbleEdit || !editing)
@@ -595,11 +636,7 @@ export function ResultGrid(props: ResultGridProps) {
                                 const next = `${draft}\n`;
 
                                 setDraft(next);
-                                setBubbleEdit(true);
-                                setBubbleSize(bubbleSizeFor(
-                                  next,
-                                  wrapRef.current?.querySelector("td.is-editing")?.getBoundingClientRect().width
-                                ));
+                                openBubble(next);
                                 return;
                               }
 
@@ -609,7 +646,8 @@ export function ResultGrid(props: ResultGridProps) {
                               cancelEdit();
                             }
                           }}
-                          onBlur={commitEdit}
+                          /* 切到气泡时输入框会卸载，别把这次切换当成失焦提交 */
+                          onBlur={() => { if (!bubbleEditRef.current) commitEdit(); }}
                         />
                       ) : (cell === null ? "NULL" : highlight(String(cell), keyword))}
                     </td>
