@@ -760,6 +760,13 @@ table.grid tbody tr:where(:nth-child(even)) td:where(:not(.rownum)) { background
 /* 未提交修改的行 */
 table.grid tbody tr.is-dirty td { background: var(--row-dirty); }
 
+/* 待删除（还没提交）的行：划掉 + 淡红，提交后才真的消失 */
+table.grid tbody tr.is-deleted td {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
 /* 当前单元格所在整行：浅蓝底（数据区整行一起） */
 table.grid tbody tr.is-row-active td { background: var(--cell-soft); }
 

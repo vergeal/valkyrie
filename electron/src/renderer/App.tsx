@@ -3569,23 +3569,120 @@ export function App() {
       await runResultAction("result.delete", { rows }, "已删除选中行");
   }
 
+  /** 批量设为 NULL：改的是成片单元格，先问一句 */
+  async function setSelectionNull() {
+    if (!gridSelection)
+      return;
+
+    const rows = selectionRows(gridSelection);
+    const cols = selectionCols(gridSelection);
+    const confirmed = await askConfirm(
+      `确定把选中的 ${rows.length} 行 × ${cols.length} 列设为 NULL？\n\n`
+      + "提交后才会写入数据库，中途可以「回滚」。",
+      "设为 NULL",
+      true
+    );
+
+    if (confirmed)
+      await runResultAction("result.setNull", { rows, cols }, "已设置为 NULL");
+  }
+
+  /** 本次未提交的改动条数（下拉 / 提示文案共用） */
+  function pendingChangeCount(): number {
+    return activeTab && "pending" in activeTab ? activeTab.pending ?? 0 : 0;
+  }
+
+  /**
+   * 提交修改：这一步才真正写库（尤其待删除的行会真的从表里消失），必须确认。
+   */
+  async function commitResultChanges() {
+    if (!currentResult?.dirty)
+      return;
+
+    const pending = pendingChangeCount();
+    const deleting = currentResult.deletedRows?.length ?? 0;
+    const details = [
+      deleting > 0 ? `· 删除 ${deleting} 行（提交后会真的从表里删掉，无法撤销）` : "",
+      pending - deleting > 0 ? `· 修改 / 新增 ${pending - deleting} 处` : ""
+    ].filter(Boolean).join("\n");
+
+    const confirmed = await askConfirm(
+      `确定把这次的改动写入数据库？\n\n${details || `· 共 ${pending} 处改动`}\n\n`
+      + "写入后无法再「回滚」，请确认目标库（生产库尤其注意）。",
+      "提交修改",
+      true
+    );
+
+    if (confirmed)
+      await runResultAction("result.commit", {}, "修改已提交");
+  }
+
+  /** 回滚：丢掉这次所有未提交改动（改动本身会消失，先确认一次） */
+  async function rollbackResultChanges() {
+    if (!currentResult?.dirty)
+      return;
+
+    const pending = pendingChangeCount();
+    const confirmed = await askConfirm(
+      `确定放弃这 ${pending} 处未提交改动？\n\n数据会恢复成数据库里的原始内容，改动无法找回。`,
+      "回滚修改",
+      true
+    );
+
+    if (confirmed)
+      await runResultAction("result.rollback", {}, "已回滚未提交的修改");
+  }
+
+  /*
+   * 结果表动作只在这里定义一份：顶部工具条与右键菜单都从这里取
+   * （文案、可用状态、执行逻辑同源，避免两个入口两套行为）。
+   */
+  const resultActions = {
+    copy: {
+      label: "复制选中单元格",
+      disabled: !gridSelection || !currentResult?.rows,
+      run: () => void copyGridSelection()
+    },
+    commit: {
+      label: "提交修改",
+      disabled: !currentResult?.dirty,
+      run: () => void commitResultChanges()
+    },
+    insert: {
+      label: "新增行",
+      disabled: !currentResult?.addable,
+      run: () => void runResultAction("result.insert", {}, "已新增一行")
+    },
+    setNull: {
+      label: "设为 NULL",
+      disabled: !currentResult?.editable || !gridSelection,
+      run: () => void setSelectionNull()
+    },
+    remove: {
+      label: "删除选中行",
+      disabled: !currentResult?.editable || !gridSelection,
+      run: () => void deleteSelectedRows()
+    },
+    rollback: {
+      label: "回滚",
+      disabled: !currentResult?.dirty,
+      run: () => void rollbackResultChanges()
+    },
+    reload: {
+      label: "刷新",
+      disabled: false,
+      run: () => void runResultAction("result.reload", {}, "已刷新")
+    }
+  };
+
   /* 结果表右键菜单（Radix ContextMenu 负责弹出/定位/关闭） */
   const gridMenuEntries: MenuEntry[] = [
-    { label: "复制选中单元格", icon: "copy", disabled: !gridSelection || !currentResult?.rows, action: () => void copyGridSelection() },
+    { label: resultActions.copy.label, icon: "copy", disabled: resultActions.copy.disabled, action: resultActions.copy.run },
     { separator: true },
-    { label: "提交修改", disabled: !currentResult?.dirty, action: () => void runResultAction("result.commit", {}, "修改已提交") },
-    { label: "新增行", disabled: !currentResult?.addable, action: () => void runResultAction("result.insert", {}, "已新增一行") },
-    {
-      label: "设置为 NULL",
-      disabled: !currentResult?.editable || !gridSelection,
-      action: () => gridSelection && void runResultAction("result.setNull", { rows: selectionRows(gridSelection), cols: selectionCols(gridSelection) }, "已设置为 NULL")
-    },
-    {
-      label: "删除选中行",
-      danger: true,
-      disabled: !currentResult?.editable || !gridSelection,
-      action: () => void deleteSelectedRows()
-    },
+    { label: resultActions.commit.label, disabled: resultActions.commit.disabled, action: resultActions.commit.run },
+    { label: resultActions.insert.label, disabled: resultActions.insert.disabled, action: resultActions.insert.run },
+    { label: resultActions.setNull.label, disabled: resultActions.setNull.disabled, action: resultActions.setNull.run },
+    { label: resultActions.remove.label, danger: true, disabled: resultActions.remove.disabled, action: resultActions.remove.run },
     { separator: true },
     {
       label: "复制为…",
@@ -4481,51 +4578,51 @@ export function App() {
                 <button
                   type="button"
                   className={`tbtn${pending === "result.insert" ? " is-busy" : ""}`}
-                  disabled={!currentResult.addable}
-                  onClick={() => void runResultAction("result.insert", {}, "已新增一行")}
+                  disabled={resultActions.insert.disabled}
+                  onClick={resultActions.insert.run}
                 >
-                  <Icon name="plus" />新增行
+                  <Icon name="plus" />{resultActions.insert.label}
                 </button>
                 <button
                   type="button"
-                  className={`tbtn${pending === "result.delete" ? " is-busy" : ""}`}
-                  disabled={!currentResult.editable || !gridSelection}
-                  onClick={() => gridSelection && void runResultAction("result.delete", { rows: selectionRows(gridSelection) }, "已删除选中行")}
+                  className={`tbtn is-danger${pending === "result.delete" ? " is-busy" : ""}`}
+                  disabled={resultActions.remove.disabled}
+                  onClick={resultActions.remove.run}
                 >
-                  <Icon name="trash" />删除行
+                  <Icon name="trash" />{resultActions.remove.label}
                 </button>
                 <button
                   type="button"
                   className={`tbtn${pending === "result.setNull" ? " is-busy" : ""}`}
-                  disabled={!currentResult.editable || !gridSelection}
-                  onClick={() => gridSelection && void runResultAction("result.setNull", { rows: selectionRows(gridSelection), cols: selectionCols(gridSelection) }, "已设置为 NULL")}
+                  disabled={resultActions.setNull.disabled}
+                  onClick={resultActions.setNull.run}
                 >
-                  设为 NULL
+                  {resultActions.setNull.label}
                 </button>
                 <span className="tbtn-sep" aria-hidden="true" />
                 <button
                   type="button"
                   className={`tbtn is-primary${pending === "result.commit" ? " is-busy" : ""}`}
-                  disabled={!currentResult.dirty}
-                  onClick={() => void runResultAction("result.commit", {}, "修改已提交")}
+                  disabled={resultActions.commit.disabled}
+                  onClick={resultActions.commit.run}
                 >
-                  <Icon name="check" />提交修改
+                  <Icon name="check" />{resultActions.commit.label}
                 </button>
                 <button
                   type="button"
                   className={`tbtn${pending === "result.rollback" ? " is-busy" : ""}`}
-                  disabled={!currentResult.dirty}
-                  onClick={() => void runResultAction("result.rollback", {}, "已回滚未提交的修改")}
+                  disabled={resultActions.rollback.disabled}
+                  onClick={resultActions.rollback.run}
                 >
-                  <Icon name="refresh" />回滚
+                  <Icon name="refresh" />{resultActions.rollback.label}
                 </button>
                 <span className="tbtn-sep" aria-hidden="true" />
                 <button
                   type="button"
                   className={`tbtn${pending === "result.reload" ? " is-busy" : ""}`}
-                  onClick={() => void runResultAction("result.reload", {}, "已刷新")}
+                  onClick={resultActions.reload.run}
                 >
-                  <Icon name="refresh" />刷新
+                  <Icon name="refresh" />{resultActions.reload.label}
                 </button>
                 <button type="button" className="tbtn" onClick={() => void exportResult("csv")}>
                   <Icon name="csv" />导出 CSV
@@ -4636,6 +4733,7 @@ export function App() {
                       offset={activeTab?.kind === "data" ? activeTab.result?.offset ?? 0 : 0}
                       editable={Boolean(currentResult?.editable)}
                       dirtyRows={activeTab && "dirtyRows" in activeTab ? activeTab.dirtyRows : []}
+                      deletedRows={currentResult?.deletedRows ?? []}
                       search={gridKeyword}
                       onSearchHitsChange={setGridHits}
                       onCellCommit={(row, col, value) => void runResultAction("result.update", { row, col, value }, "已修改（未提交）")}

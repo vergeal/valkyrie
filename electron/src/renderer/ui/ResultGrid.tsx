@@ -31,6 +31,8 @@ interface ResultGridProps {
   offset?: number;
   editable?: boolean;
   dirtyRows?: number[];
+  /** 标记为待删除（还没提交）的行：显示成划掉的样子，提交后才消失 */
+  deletedRows?: number[];
   /** 全表搜索关键字：过滤显示行，并把命中的文字用黄色标出来 */
   search?: string;
   /** 命中行数变化（null = 未搜索），外层工具条据此显示“命中 N 行” */
@@ -222,7 +224,7 @@ function measureColumns(columns: QueryColumn[], rows: (string | null)[][], fontS
 
 export function ResultGrid(props: ResultGridProps) {
   const {
-    columns, rows, flashToken = 0, fontSize = 14, offset = 0, editable = false, dirtyRows = [],
+    columns, rows, flashToken = 0, fontSize = 14, offset = 0, editable = false, dirtyRows = [], deletedRows = [],
     search = "", showTypes = true, onSearchHitsChange, onCellCommit, onSelectionChange, onContextMenu
   } = props;
   const [anchor, setAnchor] = useState<CellRef | null>(null);
@@ -695,13 +697,19 @@ export function ResultGrid(props: ResultGridProps) {
         <tbody>
           {visibleRows.map(({ row, index: rowIndex }) => {
             const dirty = dirtyRows.includes(rowIndex);
+            /* 待删除（还没提交）：划掉，提交之后才会真的从结果里消失 */
+            const deleted = deletedRows.includes(rowIndex);
             /* 当前单元格所在整行：浅蓝底（整行/整列选中时由各自规则接管） */
             const rowActive = !rowMode && !colMode && focus != null && focus.row === rowIndex;
 
             return (
               <tr
                 key={rowIndex}
-                className={[dirty ? "is-dirty" : "", rowActive ? "is-row-active" : ""].filter(Boolean).join(" ") || undefined}
+                className={[
+                  dirty ? "is-dirty" : "",
+                  deleted ? "is-deleted" : "",
+                  rowActive ? "is-row-active" : ""
+                ].filter(Boolean).join(" ") || undefined}
               >
                 <td
                   /* 只有从 # 列拖出去选整行时行号列才跟着变深；自由框选/整列选中都不动 # 列 */
@@ -711,6 +719,19 @@ export function ResultGrid(props: ResultGridProps) {
                     /* 按住行号列往下拖：整行选区跟着扩展 */
                     if (dragging.current && rowMode)
                       setFocus(previous => ({ row: rowIndex, col: previous?.col ?? 0 }));
+                  }}
+                  onContextMenu={event => {
+                    /* 右键行号 = 整行：没选中这行时先把整行选上，再弹同一套结果表菜单 */
+                    event.preventDefault();
+
+                    if (!(rowMode && bounds && rowIndex >= bounds.r1 && rowIndex <= bounds.r2)) {
+                      setRowMode(true);
+                      setColMode(false);
+                      setAnchor({ row: rowIndex, col: 0 });
+                      setFocus({ row: rowIndex, col: Math.max(0, columns.length - 1) });
+                    }
+
+                    onContextMenu?.();
                   }}
                 >
                   {offset + rowIndex + 1}

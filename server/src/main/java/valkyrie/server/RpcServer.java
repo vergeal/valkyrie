@@ -1076,7 +1076,9 @@ public class RpcServer
                 ret.put("rows", rowsJson(queryResult, true));
                 ret.put("editable", queryResult.isEditable());
                 ret.put("addable", queryResult.isAddable());
-                ret.put("dirty", queryResult.isUpdatable());
+                ret.put("dirty", queryResult.isDirty());
+                /* 待删除但还没提交的行：界面把它们标出来，提交后才真的消失 */
+                ret.put("deletedRows", new JSONArray(queryResult.getDeleteRowBuffer().stream().sorted().toList()));
 
                 return ret;
         }
@@ -1122,8 +1124,8 @@ public class RpcServer
                 for (int index : toIntArray(params.getJSONArray("rows")))
                         indices.add(index);
 
+                /* 只记进待提交缓冲：点「提交修改」才真正 DELETE，中途可以「回滚」 */
                 result.remove(indices);
-                result.reload();
 
                 return resultJson(params.getLongValue("jobId"), result);
         }

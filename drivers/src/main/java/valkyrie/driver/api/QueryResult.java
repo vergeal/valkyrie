@@ -53,6 +53,15 @@ public class QueryResult
 
         private final Map<Integer, GridRow> updateRowBuffer = new HashMap<>();
 
+        /**
+         * 待提交的删除行：删行只记账，点「提交修改」才真正发 DELETE，中途可以「回滚」。
+         * （以前是直接执行 DELETE，删了就没有回头路。）
+         */
+        private final Set<Integer> deleteRowBuffer = new LinkedHashSet<>();
+
+        /** addEmptyRow 追加的空行（还没入库）：删掉它们不必发 DELETE，重新读一遍即可 */
+        private final Set<Integer> addedRowBuffer = new LinkedHashSet<>();
+
         private final SQL sql;
 
         public interface UpdateListener
@@ -144,15 +153,27 @@ public class QueryResult
         public void addEmptyRow()
         {
                 rows.addLast(new GridRow(columns.size()));
+                addedRowBuffer.add(rows.size() - 1);
         }
 
+        /**
+         * 删除行：只记进待提交缓冲（与单元格编辑同一套语义），
+         * 提交时才执行 DELETE，回滚时直接丢弃。
+         */
         public void remove(List<Integer> indices)
         {
                 if (indices == null || indices.isEmpty())
                         return;
 
-                SQL sql = toDeleteSQL(indices);
-                driver.execute(session, sql);
+                for (int index : indices) {
+                        if (index < 0 || index >= rows.size())
+                                continue;
+
+                        /* 这行都要删了，之前对它做的单元格改动一并作废 */
+                        updateRowBuffer.remove(index);
+                        addedRowBuffer.remove(index);
+                        deleteRowBuffer.add(index);
+                }
         }
 
         public void addUpdateRow(int colIndex, int rowIndex, String newValue)
@@ -182,24 +203,49 @@ public class QueryResult
                 return !updateRowBuffer.isEmpty();
         }
 
+        /** 有未提交改动：改过单元格，或者标记了待删除的行 */
+        public boolean isDirty()
+        {
+                return isUpdatable() || !deleteRowBuffer.isEmpty();
+        }
+
         public void clearUpdateBuffer()
         {
                 updateRowBuffer.clear();
+                deleteRowBuffer.clear();
         }
 
         /**
-         * 刷新行更新缓冲区
+         * 提交未保存的改动：先执行单元格更新，再执行待删除的行，最后重新读一遍结果。
          */
         public void update()
         {
-                if (!isUpdatable())
+                if (!isDirty())
                         return;
 
-                SQL sql = toUpdateSQL();
+                if (isUpdatable())
+                        executeChange(toUpdateSQL(), "没有匹配到需要更新的数据行，修改可能未生效");
 
+                if (!deleteRowBuffer.isEmpty())
+                        executeChange(toDeleteSQL(new ArrayList<>(deleteRowBuffer)), "没有匹配到需要删除的数据行，删除可能未生效");
+
+                reload();
+                updateRowBuffer.clear();
+                deleteRowBuffer.clear();
+        }
+
+        /**
+         * 执行一条改动语句并核对影响行数。
+         * <p>
+         * 影响行数为 0 说明 WHERE 没有匹配到原始数据行（数据可能已被其它会话修改，
+         * 或无主键表的定位条件不精确）。此时必须报错，而不是静默重载旧数据，
+         * 否则用户会看到"提交了但数据没变"。
+         */
+        private void executeChange(SQL statement, String emptyMessage)
+        {
                 int[] affected = { 0 };
 
-                driver.execute(-1, session, sql, new SQLExecuteCallback()
+                driver.execute(-1, session, statement, new SQLExecuteCallback()
                 {
                         @Override
                         public void row(int value)
@@ -208,16 +254,8 @@ public class QueryResult
                         }
                 });
 
-                /*
-                 * 影响行数为 0 说明 WHERE 没有匹配到原始数据行（数据可能已被其他
-                 * 会话修改，或无主键表的定位条件不精确）。此时必须报错，而不是
-                 * 静默重载旧数据，否则用户会看到"提交了但数据没更新"。
-                 */
                 if (affected[0] <= 0)
-                        throw new DriverException("没有匹配到需要更新的数据行，修改可能未生效");
-
-                reload();
-                updateRowBuffer.clear();
+                        throw new DriverException(emptyMessage);
         }
 
         private SQL toDeleteSQL(List<Integer> indices)
