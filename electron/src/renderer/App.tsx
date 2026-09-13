@@ -38,7 +38,7 @@ import { OptionsDialog } from "./ui/OptionsDialog";
 import { Select } from "./ui/Select";
 import { Icon } from "./ui/icons";
 import { LogConsole, appendLog, errorRecord, progressRecord, type LogRecord } from "./ui/LogConsole";
-import { loadSettings, saveSettings, type AppSettings } from "./settings";
+import { hydrateSettings, loadSettings, saveSettings, type AppSettings, type ThemeMode } from "./settings";
 import { ACCEL, IS_MAC, KEY } from "./keys";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Toaster, toast } from "sonner";
@@ -109,7 +109,7 @@ function ensureGithubDarkTheme() {
 
 const DEFAULT_SQL = "";
 
-type ThemeMode = "light" | "dark" | "system";
+/* 主题模式的类型定义在 settings.ts 里（它跟着设置一起持久化） */
 
 const NEXT_THEME: Record<ThemeMode, ThemeMode> = { light: "dark", dark: "system", system: "light" };
 const THEME_LABEL: Record<ThemeMode, string> = { light: "浅色", dark: "深色", system: "跟随系统" };
@@ -146,6 +146,8 @@ interface QueryTab extends BaseTab {
 
 interface DataTab extends BaseTab {
   kind: "data";
+  /** 这个数据页属于哪个连接（多连接并存时各自用各自的会话） */
+  connection?: string;
   node: SchemaNode;
   result: QueryResultPayload | null;
   dirtyRows: number[];
@@ -155,6 +157,7 @@ interface DataTab extends BaseTab {
 
 interface DesignTab extends BaseTab {
   kind: "design";
+  connection?: string;
   node: SchemaNode;
   columns: TableColumn[];
   indexes: TableIndex[];
@@ -169,6 +172,8 @@ interface DesignTab extends BaseTab {
 interface ObjectTabTables extends BaseTab {
   kind: "objects";
   view: "tables";
+  /** 表列表所属连接 */
+  connection?: string;
   /* 数据表列表所属的「数据表」容器节点 */
   node: SchemaNode;
   tables: SchemaNode[];
@@ -179,6 +184,8 @@ interface ObjectTabTables extends BaseTab {
 interface ObjectTabScripts extends BaseTab {
   kind: "objects";
   view: "scripts";
+  /** 脚本列表也按连接归属，关连接时一起收走 */
+  connection?: string;
   node: null;
   tables: SchemaNode[];
   scripts: ScriptFile[];
@@ -214,6 +221,10 @@ function newQueryTab(): QueryTab {
 export function App() {
   const [connections, setConnections] = useState<SavedConnection[]>([]);
   const [session, setSession] = useState<SessionState | null>(null);
+  /* 已打开的连接会话：多连接并存，key = 连接名 */
+  const [openSessions, setOpenSessions] = useState<Record<string, SessionState>>({});
+  /* 每个连接各自的数据库根节点 */
+  const [rootsByConnection, setRootsByConnection] = useState<Record<string, SchemaNode[]>>({});
   const [roots, setRoots] = useState<SchemaNode[]>([]);
   const [childrenMap, setChildrenMap] = useState<Record<string, SchemaNode[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["conn-root"]));
@@ -314,11 +325,17 @@ export function App() {
   }
 
   const [status, setStatus] = useState("就绪");
-  const [theme, setTheme] = useState<ThemeMode>("light");
   const [maximized, setMaximized] = useState(false);
   /* 客户端配置（选项对话框里改，改完立即生效并落盘） */
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   const [optionsOpen, setOptionsOpen] = useState(false);
+
+  /* 主题也放进设置里，这样能跟着设置一起持久化 */
+  const theme = settings.theme;
+
+  function setTheme(next: ThemeMode) {
+    updateSettings({ theme: next });
+  }
 
   function updateSettings(patch: Partial<AppSettings>) {
     setSettings(previous => {
@@ -327,6 +344,15 @@ export function App() {
       return next;
     });
   }
+
+  /* 启动时用主进程里的 settings.json 校准一次（localStorage 只当首屏兜底） */
+  useEffect(() => {
+    void hydrateSettings(loadSettings()).then(loaded => setSettings(loaded));
+  }, []);
+
+  /* 日志上限会用在只注册一次的事件回调里，用 ref 取最新值 */
+  const logLimitRef = useRef(settings.logLimit);
+  logLimitRef.current = settings.logLimit;
 
   /* 三栏与「编辑器 / 结果」两段布局交给 react-resizable-panels（自带记忆与最小尺寸） */
   /*
@@ -412,7 +438,7 @@ export function App() {
       if (event.kind === "cost" && event.detail)
         setLastCost(Number(event.detail));
 
-      setLogs(previous => appendLog(previous, record));
+      setLogs(previous => appendLog(previous, record, logLimitRef.current));
 
       const tabId = event.jobId != null ? jobTabRef.current.get(event.jobId) : undefined;
 
@@ -488,11 +514,18 @@ export function App() {
     editor.updateOptions({
       fontSize: settings.editorFontSize,
       lineHeight: Math.round(settings.editorFontSize * 1.45),
+      fontFamily: `"${settings.editorFontFamily}", Consolas, "Courier New", monospace`,
       wordWrap: settings.editorWordWrap ? "on" : "off",
+      lineNumbers: settings.editorLineNumbers ? "on" : "off",
+      tabSize: settings.editorTabSize,
+      minimap: { enabled: settings.editorMinimap },
       quickSuggestions: settings.suggestEnabled ? { other: true, comments: false, strings: false } : false,
       suggestOnTriggerCharacters: settings.suggestEnabled
     });
-  }, [settings.editorFontSize, settings.editorWordWrap, settings.suggestEnabled]);
+  }, [
+    settings.editorFontSize, settings.editorFontFamily, settings.editorWordWrap, settings.suggestEnabled,
+    settings.editorLineNumbers, settings.editorTabSize, settings.editorMinimap
+  ]);
 
   useEffect(() => {
     if (!editorContainer.current || editorRef.current)
@@ -648,7 +681,7 @@ export function App() {
       return;
     }
 
-    const params = tableParams(session.sessionId, activeNode);
+    const params = tableParams(sessionOfNode(activeNode)?.sessionId ?? session.sessionId, activeNode);
 
     void Promise.all([
       invoke<{ columns: TableColumn[] }>("table.columns", params),
@@ -840,20 +873,34 @@ export function App() {
     setError(null);
     setStatus(`正在连接 ${connection.name} …`);
 
-    /* 换连接会清掉当前会话：先把没保存的内容问清楚 */
-    if (session && session.name !== connection.name) {
-      const unsaved = tabs.filter(hasUnsaved);
+    /* 已经连上就直接切过去：多连接并存，不会把别的连接顶掉 */
+    const opened = openSessions[connection.name];
 
-      if (unsaved.length > 0) {
-        const confirmed = await askConfirm(
-          `连接 ${session.name} 上还有没保存的内容：\n${unsaved.map(describeUnsaved).join("\n")}\n\n切到 ${connection.name} 会丢失这些改动，确定继续吗？`,
-          "未保存的修改",
-          true
-        );
+    if (opened) {
+      setSession(opened);
+      lastSessionRef.current = { name: connection.name, type: connection.type ?? lastSessionRef.current.type };
+      setStatus(`已切换到 ${connection.name}`);
 
-        if (!confirmed)
-          return false;
+      /* 该连接的根节点如果还没拉过（例如刚被别的窗口清掉），补一次 */
+      if (!rootsByConnection[connection.name]) {
+        try {
+          const payload = await invoke<OpenConnectionPayload>("connection.open", { name: connection.name });
+
+          setOpenSessions(previous => ({
+            ...previous,
+            [connection.name]: { sessionId: payload.sessionId, name: connection.name, product: payload.product }
+          }));
+          setRootsByConnection(previous => ({ ...previous, [connection.name]: payload.nodes }));
+          setRoots(payload.nodes);
+        } catch (e) {
+          setError(messageOf(e));
+        }
+      } else {
+        setRoots(rootsByConnection[connection.name]);
       }
+
+      setExpanded(previous => new Set(previous).add(`conn:${connection.name}`));
+      return true;
     }
 
     /* 连接期间在对应节点上显示加载动画 */
@@ -862,18 +909,17 @@ export function App() {
     setLoadingNodes(previous => new Set(previous).add(nodeId));
 
     try {
-      if (session)
-        await invoke("connection.close", { sessionId: session.sessionId }).catch(() => undefined);
+      const payload = await withBusy(() => invoke<OpenConnectionPayload>("connection.open", { name: connection.name }));
+      const next = { sessionId: payload.sessionId, name: connection.name, product: payload.product };
 
-      const opened = await withBusy(() => invoke<OpenConnectionPayload>("connection.open", { name: connection.name }));
-
-      setSession({ sessionId: opened.sessionId, name: connection.name, product: opened.product });
+      setOpenSessions(previous => ({ ...previous, [connection.name]: next }));
+      setSession(next);
       lastSessionRef.current = {
         name: connection.name,
-        type: connection.type ?? opened.product.type ?? lastSessionRef.current.type
+        type: connection.type ?? payload.product.type ?? lastSessionRef.current.type
       };
-      setRoots(opened.nodes);
-      setChildrenMap({});
+      setRootsByConnection(previous => ({ ...previous, [connection.name]: payload.nodes }));
+      setRoots(payload.nodes);
       setActiveNode(null);
       setStatus(`已连接 ${connection.name}`);
 
@@ -978,7 +1024,7 @@ export function App() {
     if (childrenMap[node.id] || loadingNodes.has(node.id))
       return;
 
-    await loadChildren(session.sessionId, node);
+    await loadChildren(sessionOfNode(node)?.sessionId ?? "", node);
   }
 
   /**
@@ -1076,6 +1122,50 @@ export function App() {
   function parentTreeNode(id: string): SchemaNode | null {
     const entry = Object.entries(treeChildren).find(([, children]) => children.some(child => child.id === id));
     return entry ? findTreeNode(entry[0]) : null;
+  }
+
+  /** 连接名 → 会话：多连接并存时按名字取，取不到退回当前活动会话 */
+  function sessionByName(name?: string): SessionState | null {
+    if (name && openSessions[name])
+      return openSessions[name];
+
+    return session;
+  }
+
+  /** 树节点属于哪个连接：沿父链找到 CONNECTION 节点 */
+  function connectionOfNode(node: SchemaNode | null | undefined): string | undefined {
+    for (let current: SchemaNode | null = node ?? null, guard = 0; current && guard < 16; guard++) {
+      if (current.kind === "CONNECTION")
+        return current.label;
+
+      current = parentTreeNode(current.id);
+    }
+
+    return undefined;
+  }
+
+  /** 标签属于哪个连接 */
+  function connectionOfTab(tab: WorkTab | null | undefined): string | undefined {
+    if (!tab)
+      return undefined;
+
+    if (tab.kind === "query")
+      return tab.path.connection ?? tab.script?.connection;
+
+    if (tab.kind === "data" || tab.kind === "design" || tab.kind === "objects")
+      return tab.connection;
+
+    return undefined;
+  }
+
+  /** 节点（或标签）对应的会话 */
+  function sessionOfNode(node: SchemaNode | null | undefined, tab?: WorkTab | null): SessionState | null {
+    return sessionByName(connectionOfNode(node) ?? connectionOfTab(tab));
+  }
+
+  /** 标签对应的会话（控制台执行、取消、执行计划都按标签所属连接取） */
+  function sessionOfTab(tab: WorkTab | null | undefined): SessionState | null {
+    return sessionByName(connectionOfTab(tab));
   }
 
   /** 选中节点 → 执行上下文：连接名 + 数据库 + 模式 */
@@ -1221,6 +1311,7 @@ export function App() {
       title: node.label,
       running: false,
       messages: [],
+      connection: connectionOfNode(node),
       node,
       result: null,
       dirtyRows: [],
@@ -1241,7 +1332,19 @@ export function App() {
   function selectTreeNode(node: SchemaNode) {
     setActiveNode(node);
 
-    if (!session)
+    /* 选到别的连接下的节点：把活动会话切过去（多连接并存，互不关闭） */
+    const owner = connectionOfNode(node);
+    const owned = owner ? openSessions[owner] : undefined;
+
+    if (owned && owned.sessionId !== session?.sessionId) {
+      setSession(owned);
+      setRoots(rootsByConnection[owner!] ?? []);
+      setCatalogOptions(rootsByConnection[owner!] ?? []);
+      setSchemaOptions([]);
+      setTableNodes([]);
+    }
+
+    if (!owned && !session)
       return;
 
     if (node.kind === "QUERY") {
@@ -1267,7 +1370,9 @@ export function App() {
    * - `force` 为 false（树选中联动）时优先用已有内容，不重新读库。
    */
   async function showTableList(source: SchemaNode, options: { force?: boolean; quiet?: boolean } = {}) {
-    if (!session) {
+    const owner = sessionOfNode(source);
+
+    if (!owner) {
       if (!options.quiet)
         setError("请先在左侧选择一个连接");
 
@@ -1288,7 +1393,7 @@ export function App() {
     let container = target.kind === "TABLE" && target.hasChildren ? target : null;
 
     if (!container) {
-      const children = await loadChildren(session.sessionId, target);
+      const children = await loadChildren(owner.sessionId, target);
       container = children.find(child => child.kind === "TABLE" && child.hasChildren) ?? null;
     }
 
@@ -1314,7 +1419,7 @@ export function App() {
       return;
     }
 
-    const tables = await loadTableNodes(container, options.force ?? false);
+    const tables = await loadTableNodes(container, options.force ?? false, owner.sessionId);
 
     /* 切换库 / 模式时也让列表"空一下再出现"，和刷新一个观感 */
     setListFlash(previous => previous + 1);
@@ -1331,6 +1436,7 @@ export function App() {
           {
             ...current,
             view: "tables",
+            connection: owner.name,
             node: container,
             tables,
             loading: false,
@@ -1349,6 +1455,7 @@ export function App() {
       id: `tab-${tabSequence++}`,
       kind: "objects",
       view: "tables",
+      connection: owner.name,
       title: OBJECT_TAB_TITLE,
       running: false,
       messages: [],
@@ -1369,21 +1476,25 @@ export function App() {
     await showTableList(source, { force: true });
   }
 
-  async function loadTableNodes(container: SchemaNode, force = true): Promise<SchemaNode[]> {
-    if (!session)
+  async function loadTableNodes(container: SchemaNode, force = true, sessionId?: string): Promise<SchemaNode[]> {
+    const id = sessionId ?? sessionOfNode(container)?.sessionId;
+
+    if (!id)
       return [];
 
-    const children = await loadChildren(session.sessionId, container, force);
+    const children = await loadChildren(id, container, force);
 
     return children.filter(node => node.kind === "TABLE" && !node.hasChildren);
   }
 
   async function refreshTableList(tabId: string, container: SchemaNode) {
+    const tab = tabs.find(item => item.id === tabId);
+
     setPending("tableList");
     updateTab(tabId, { loading: true, view: "tables" });
 
     try {
-      const tables = await loadTableNodes(container);
+      const tables = await loadTableNodes(container, true, sessionByName(connectionOfTab(tab))?.sessionId ?? undefined);
 
       /* 顺带把标签页绑定的容器节点换成刚读到的这份，后续刷新继续对齐 */
       updateTab(tabId, { view: "tables", tables, node: container, loading: false, title: OBJECT_TAB_TITLE });
@@ -1405,7 +1516,7 @@ export function App() {
    * 没开对象页时只重读树节点，不给不存在的列表闪。
    */
   async function refreshObjectList(node: SchemaNode) {
-    const active = sessionRef.current;
+    const active = sessionOfNode(node);
 
     if (!active)
       return;
@@ -1496,6 +1607,7 @@ export function App() {
       title: `设计: ${node.label}`,
       running: false,
       messages: [],
+      connection: connectionOfNode(node),
       node,
       columns: [],
       indexes: [],
@@ -1802,6 +1914,7 @@ export function App() {
       id: `tab-${tabSequence++}`,
       kind: "objects",
       view: "scripts",
+      connection: session.name,
       title: OBJECT_TAB_TITLE,
       running: false,
       messages: [],
@@ -1977,7 +2090,10 @@ export function App() {
 
   /** 执行表设计页里编辑过的 DDL（先确认，再重新读取结构与表列表） */
   async function applyTableDdl(tabId: string, node: SchemaNode, ddl: string) {
-    if (!session)
+    const tab = tabs.find(item => item.id === tabId);
+    const target = sessionOfNode(node, tab);
+
+    if (!target)
       return;
 
     const confirmed = await askConfirm(
@@ -1991,7 +2107,7 @@ export function App() {
 
     try {
       await withBusy(() => invoke("query.execute", {
-        sessionId: session.sessionId,
+        sessionId: target.sessionId,
         sql: ddl,
         jobId: Date.now(),
         catalog: node.catalog,
@@ -2017,27 +2133,40 @@ export function App() {
   }
 
   async function copyDdl(node: SchemaNode) {
-    if (!session)
+    const target = sessionOfNode(node);
+
+    if (!target)
       return;
 
     try {
-      const payload = await invoke<{ ddl: string }>("table.ddl", tableParams(session.sessionId, node));
+      const payload = await invoke<{ ddl: string }>("table.ddl", tableParams(target.sessionId, node));
       await copyText(payload.ddl);
     } catch (e) {
       setError(messageOf(e));
     }
   }
 
-  async function disconnect() {
-    if (!session)
+  /**
+   * 关闭某个连接（不传就是当前活动的那个）。
+   * 多连接并存：只清掉这个连接的会话、根节点与它的数据页 / 设计页 / 对象页，
+   * 其它连接完全不受影响；查询控制台保留（SQL 文本不丢），只清执行结果。
+   */
+  async function disconnect(name?: string) {
+    const target = name ?? session?.name;
+
+    if (!target)
       return;
 
-    /* 有没保存的内容就先确认：断开后脚本页与结果集都会一起收走 */
-    const unsaved = tabs.filter(hasUnsaved);
+    const targetSession = openSessions[target] ?? (session?.name === target ? session : null);
+    const closingTabs = tabs.filter(tab =>
+      (tab.kind === "data" || tab.kind === "design") && tab.connection === target
+      || tab.kind === "objects"
+      || (tab.kind === "query" && tab.path.connection === target));
+    const unsaved = closingTabs.filter(hasUnsaved);
 
     if (unsaved.length > 0) {
       const confirmed = await askConfirm(
-        `以下标签还有没保存的内容：\n${unsaved.map(describeUnsaved).join("\n")}\n\n断开连接后这些改动会丢失，确定断开吗？`,
+        `连接 ${target} 上还有没保存的内容：\n${unsaved.map(describeUnsaved).join("\n")}\n\n关闭连接后这些改动会丢失，确定关闭吗？`,
         "未保存的修改",
         true
       );
@@ -2046,28 +2175,42 @@ export function App() {
         return;
     }
 
-    await invoke("connection.close", { sessionId: session.sessionId }).catch(() => undefined);
+    if (targetSession)
+      await invoke("connection.close", { sessionId: targetSession.sessionId }).catch(() => undefined);
 
-    /*
-     * 真正的断开：连接相关的东西全部清掉 ——
-     * 数据页 / 表设计页 / 「对象」页随连接失效，直接关闭；
-     * 查询控制台保留 SQL 文本（避免丢未保存的内容），但结果集、消息、执行计划与执行上下文一起清空。
-     */
+    setOpenSessions(previous => {
+      const next = { ...previous };
+
+      delete next[target];
+      return next;
+    });
+    setRootsByConnection(previous => {
+      const next = { ...previous };
+
+      delete next[target];
+      return next;
+    });
+
+    /* 关掉这个连接的数据页 / 设计页 / 对象页；查询控制台只清结果，保留 SQL */
     const remaining = tabs
-      .filter(tab => tab.kind === "query")
-      .map(tab => ({ ...tab, result: null, plan: null, messages: [], running: false, path: {} } as WorkTab));
+      .filter(tab => !((tab.kind === "data" || tab.kind === "design") && tab.connection === target))
+      .filter(tab => !(tab.kind === "objects" && tab.connection === target))
+      .map(tab => tab.kind === "query" && tab.path.connection === target
+        ? { ...tab, result: null, plan: null, messages: [], running: false, path: {} } as WorkTab
+        : tab);
 
     setTabs(remaining);
     setActiveTabId(previous => (remaining.some(tab => tab.id === previous) ? previous : remaining[0]?.id ?? ""));
     setResultPane("grid");
 
-    setSession(null);
-    setRoots([]);
-    setChildrenMap({});
-    setCatalogOptions([]);
+    /* 活动会话换成还开着的另一个连接（没有就变成未连接） */
+    const nextName = Object.keys(openSessions).find(item => item !== target);
+    const nextSession = nextName ? openSessions[nextName] : null;
+
+    setSession(nextSession);
+    setRoots(nextSession && nextName ? rootsByConnection[nextName] ?? [] : []);
+    setCatalogOptions(nextSession && nextName ? rootsByConnection[nextName] ?? [] : []);
     setSchemaOptions([]);
-    /* 只收起连接下面的库/表，连接列表本身要留在原地（否则关一个连接整个列表都不见了） */
-    setExpanded(new Set(["conn-root"]));
     setActiveNode(null);
     setTableNodes([]);
     setTableFilter("");
@@ -2081,10 +2224,9 @@ export function App() {
     setGridSelection(null);
     setInfoColumns([]);
     setInfoIndexes([]);
-    setLogs([]);
     setLastCost(null);
     setError(null);
-    setStatus("已断开连接");
+    setStatus(`已关闭连接 ${target}`);
   }
 
   /* 重新拉取某个节点的下一级对象 */
@@ -2104,16 +2246,18 @@ export function App() {
   }
 
   /* 执行一条语句（用于清空表 / 删除表这类对象操作） */
-  async function executeStatement(sql: string) {
-    if (!session)
+  async function executeStatement(sql: string, node?: SchemaNode) {
+    const target = sessionOfNode(node ?? activeNode);
+
+    if (!target)
       return;
 
     await invoke<QueryResultPayload>("query.execute", {
-      sessionId: session.sessionId,
+      sessionId: target.sessionId,
       sql,
       jobId: Date.now(),
-      catalog: activeNode?.catalog,
-      schema: activeNode?.schema
+      catalog: node?.catalog ?? activeNode?.catalog,
+      schema: node?.schema ?? activeNode?.schema
     });
   }
 
@@ -2128,7 +2272,7 @@ export function App() {
       : `TRUNCATE TABLE ${node.label}`;
 
     try {
-      await executeStatement(sql);
+      await executeStatement(sql, node);
       await refreshObjectList(node);
       setStatus(`已清空 ${node.label}`);
     } catch (e) {
@@ -2143,7 +2287,7 @@ export function App() {
       return;
 
     try {
-      await executeStatement(`DROP TABLE ${node.label}`);
+      await executeStatement(`DROP TABLE ${node.label}`, node);
       await refreshObjectList(node);
       setStatus(`已删除 ${node.label}`);
     } catch (e) {
@@ -2163,7 +2307,7 @@ export function App() {
 
     try {
       for (const node of nodes) {
-        await executeStatement(`DROP TABLE ${node.label}`);
+        await executeStatement(`DROP TABLE ${node.label}`, node);
         await refreshObjectList(node);
       }
 
@@ -2182,8 +2326,8 @@ export function App() {
       return;
 
     try {
-      if (session?.name === name)
-        await disconnect();
+        if (openSessions[name] || session?.name === name)
+          await disconnect(name);
 
       await invoke("connections.delete", { name });
       await refreshConnections();
@@ -2211,7 +2355,7 @@ export function App() {
         {
           label: node.connected ? "关闭连接" : "打开连接",
           /* 关闭连接 = 真正断开：关掉该连接下的数据页 / 设计页 / 对象页 */
-          action: () => void (node.connected ? disconnect() : toggleNode(node))
+          action: () => void (node.connected ? disconnect(node.label) : toggleNode(node))
         },
         { label: "新建查询", action: createQueryTab },
         { separator: true },
@@ -2322,14 +2466,17 @@ export function App() {
   }
 
   async function loadPage(tabId: string, node: SchemaNode, page: number, pageSize: number) {
-    if (!session)
+    const tab = tabs.find(item => item.id === tabId);
+    const target = sessionOfNode(node, tab);
+
+    if (!target)
       return;
 
     setPending("loadPage");
 
     try {
       const payload = await invoke<QueryResultPayload>("table.page", {
-        ...tableParams(session.sessionId, node),
+        ...tableParams(target.sessionId, node),
         offset: page * pageSize,
         size: pageSize
       });
@@ -2345,10 +2492,13 @@ export function App() {
   }
 
   async function loadDesign(tabId: string, node: SchemaNode) {
-    if (!session)
+    const tab = tabs.find(item => item.id === tabId);
+    const target = sessionOfNode(node, tab);
+
+    if (!target)
       return;
 
-    const params = tableParams(session.sessionId, node);
+    const params = tableParams(target.sessionId, node);
 
     try {
       const [columns, indexes, ddl] = await Promise.all([
@@ -2372,17 +2522,19 @@ export function App() {
   /* ------------------------------ 执行 ------------------------------ */
 
   const runQuery = useCallback(async (tabId: string, sql: string) => {
-    if (!session) {
-      setError("请先在左侧选择一个连接");
-      return;
-    }
-
     if (!sql.trim())
       return;
 
     const jobId = Date.now();
     const tab = tabs.find(item => item.id === tabId);
     const context = tab?.kind === "query" ? tab.path : {};
+    /* 用这个控制台所属连接的会话，多连接并存时不会串到别的连接上 */
+    const target = sessionByName(context.connection);
+
+    if (!target) {
+      setError("请先在左侧选择一个连接");
+      return;
+    }
 
     jobTabRef.current.set(jobId, tabId);
     runningJobRef.current.set(tabId, jobId);
@@ -2395,7 +2547,7 @@ export function App() {
 
     try {
       const payload = await invoke<QueryResultPayload>("query.execute", {
-        sessionId: session.sessionId,
+        sessionId: target.sessionId,
         sql,
         jobId,
         catalog: context.catalog,
@@ -2420,7 +2572,7 @@ export function App() {
       /* 语句执行失败：写进日志面板（不弹窗、不占工作区顶部） */
       const line = formatErrorLog(message);
 
-      setLogs(previous => appendLog(previous, errorRecord(message, jobId)));
+      setLogs(previous => appendLog(previous, errorRecord(message, jobId), logLimitRef.current));
       setResultPane("log");
       setStatus("执行失败");
       updateTab(tabId, { running: false, messages: [line] });
@@ -2559,7 +2711,9 @@ export function App() {
   }, []);
 
   async function stopQuery() {
-    if (!session || !activeTab || !activeTab.running)
+    const target = sessionOfTab(activeTab);
+
+    if (!target || !activeTab || !activeTab.running)
       return;
 
     const jobId = runningJobRef.current.get(activeTab.id);
@@ -2567,7 +2721,7 @@ export function App() {
     if (jobId == null)
       return;
 
-    await invoke("query.cancel", { sessionId: session.sessionId, jobId }).catch(() => undefined);
+    await invoke("query.cancel", { sessionId: target.sessionId, jobId }).catch(() => undefined);
     setStatus("已请求取消");
   }
 
@@ -2603,7 +2757,9 @@ export function App() {
   }
 
   async function explainActiveQuery() {
-    if (!session || !activeTab || activeTab.kind !== "query")
+    const target = sessionOfTab(activeTab);
+
+    if (!target || !activeTab || activeTab.kind !== "query")
       return;
 
     setResultPane("plan");
@@ -2613,7 +2769,7 @@ export function App() {
 
     try {
       const payload = await invoke<QueryResultPayload>("query.execute", {
-        sessionId: session.sessionId,
+        sessionId: target.sessionId,
         sql: `EXPLAIN ${activeTab.sql.replace(/;\s*$/, "")}`,
         jobId
       });
@@ -2624,7 +2780,7 @@ export function App() {
       /* 执行计划解析失败：同样写进日志面板 */
       const message = messageOf(e);
 
-      setLogs(previous => appendLog(previous, errorRecord(message, jobId)));
+      setLogs(previous => appendLog(previous, errorRecord(message, jobId), logLimitRef.current));
       setResultPane("log");
       setStatus("执行计划解析失败");
     }
@@ -2955,16 +3111,18 @@ export function App() {
         label: connection.name,
         kind: "CONNECTION" as const,
         hasChildren: true,
-        connected: session?.name === connection.name,
+        /* 多连接并存：凡是开着会话的连接都算已连接 */
+        connected: Boolean(openSessions[connection.name]),
         dbType: connection.type
       }))
     };
 
-    if (session)
-      merged[`conn:${session.name}`] = roots;
+    /* 每个已打开连接各自的数据库列表都挂上去 */
+    for (const [name, nodes] of Object.entries(rootsByConnection))
+      merged[`conn:${name}`] = nodes;
 
     return merged;
-  }, [childrenMap, connections, roots, session]);
+  }, [childrenMap, connections, rootsByConnection, openSessions]);
 
   interface MenuItemDef {
     label?: string;
@@ -3816,6 +3974,7 @@ export function App() {
                       rows={rows}
                       flashToken={gridFlash}
                       fontSize={settings.gridFontSize}
+                      showTypes={settings.gridHeaderType}
                       onContextMenu={() => void popupNativeMenu(gridMenuEntries)}
                       offset={activeTab?.kind === "data" ? activeTab.result?.offset ?? 0 : 0}
                       editable={Boolean(currentResult?.editable)}

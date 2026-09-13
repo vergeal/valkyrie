@@ -55,5 +55,9 @@ contextBridge.exposeInMainWorld("valkyrie", {
   showMenu: options => ipcRenderer.invoke("valkyrie:show-menu", options),
 
   /* 让原生菜单 / 系统对话框跟随应用主题 */
-  setNativeTheme: theme => ipcRenderer.invoke("valkyrie:set-native-theme", theme)
+  setNativeTheme: theme => ipcRenderer.invoke("valkyrie:set-native-theme", theme),
+
+  /* 客户端设置：主进程写到 userData/settings.json */
+  loadSettings: () => ipcRenderer.invoke("valkyrie:settings-load"),
+  saveSettings: settings => ipcRenderer.invoke("valkyrie:settings-save", settings)
 });

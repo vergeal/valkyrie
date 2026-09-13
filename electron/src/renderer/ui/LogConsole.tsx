@@ -89,11 +89,11 @@ export function errorRecord(message: string, jobId?: number): LogRecord {
 /** 内存里保留的日志条数上限（超出后丢最老的） */
 export const LOG_LIMIT = 2048;
 
-/** 追加一条日志，超过上限时丢掉最早的记录 */
-export function appendLog(records: LogRecord[], record: LogRecord): LogRecord[] {
+/** 追加一条日志，超过上限时丢掉最早的记录（上限可在「选项」里配） */
+export function appendLog(records: LogRecord[], record: LogRecord, limit = LOG_LIMIT): LogRecord[] {
   const next = [...records, record];
 
-  return next.length > LOG_LIMIT ? next.slice(-LOG_LIMIT) : next;
+  return next.length > limit ? next.slice(-limit) : next;
 }
 
 /**

@@ -2525,3 +2525,121 @@ table.script-list .table-name { min-width: 200px; max-width: 520px; }
 }
 
 .cell-bubble .mini-btn:disabled svg { color: var(--muted); }
+
+/* ------------------------------ 选项窗口 ------------------------------ */
+
+/* 左分类 + 右设置项：参考 VS Code / IDEA 的偏好设置窗口 */
+.options-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(900px, calc(100% - 48px));
+  height: min(640px, 82vh);
+}
+
+.options-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 12px 0;
+  padding: 0 10px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--muted);
+}
+
+.options-search:focus-within { border-color: var(--accent); }
+
+.options-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.options-tabs {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  margin-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.options-nav {
+  display: flex;
+  flex: 0 0 186px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+  overflow: auto;
+  border-right: 1px solid var(--line-soft);
+}
+
+.options-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.options-nav-item:hover { background: var(--hover); }
+
+.options-nav-item.is-active {
+  background: var(--active);
+  color: var(--accent);
+}
+
+.options-body {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 6px 18px 12px;
+}
+
+.opt-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.opt-row:last-child { border-bottom: 0; }
+
+.opt-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.opt-label { font-size: 13px; }
+
+.opt-desc {
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.opt-control {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 132px;
+}
+
+.options-actions { border-top: 1px solid var(--line-soft); }

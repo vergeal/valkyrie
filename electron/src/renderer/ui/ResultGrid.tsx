@@ -24,6 +24,8 @@ interface ResultGridProps {
   flashToken?: number;
   /** 表格字号（px）：列宽按这个字号实测 */
   fontSize?: number;
+  /** 表头显示字段类型（第二行小字） */
+  showTypes?: boolean;
   /** 右键单元格（外层据此弹出系统原生菜单） */
   onContextMenu?: () => void;
   offset?: number;
@@ -221,7 +223,7 @@ function measureColumns(columns: QueryColumn[], rows: (string | null)[][], fontS
 export function ResultGrid(props: ResultGridProps) {
   const {
     columns, rows, flashToken = 0, fontSize = 14, offset = 0, editable = false, dirtyRows = [],
-    search = "", onSearchHitsChange, onCellCommit, onSelectionChange, onContextMenu
+    search = "", showTypes = true, onSearchHitsChange, onCellCommit, onSelectionChange, onContextMenu
   } = props;
   const [anchor, setAnchor] = useState<CellRef | null>(null);
   const [focus, setFocus] = useState<CellRef | null>(null);
@@ -651,8 +653,7 @@ export function ResultGrid(props: ResultGridProps) {
                   {column.label}
                 </span>
                 <span className="grid-type">
-                  {column.type}
-                  {column.notNull ? " · NOT NULL" : ""}
+                  {showTypes ? `${column.type}${column.notNull ? " · NOT NULL" : ""}` : ""}
                 </span>
                 <span
                   className="col-resizer"

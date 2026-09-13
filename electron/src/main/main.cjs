@@ -2,6 +2,7 @@
 
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeTheme, nativeImage } = require("electron");
 const path = require("node:path");
+const fs = require("node:fs");
 const { JavaBridge } = require("./java-bridge.cjs");
 const { createSplash } = require("./splash.cjs");
 const { registerWindowControls, attachWindowState, disableBrowserShortcuts } = require("./window-controls.cjs");
@@ -69,6 +70,18 @@ function createWindow() {
 
   installApplicationMenu();
 
+  /* 读一下客户端设置：启动是否最大化（默认是） */
+  let startMaximized = true;
+
+  try {
+    const settings = JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "settings.json"), "utf8"));
+
+    if (typeof settings.startMaximized === "boolean")
+      startMaximized = settings.startMaximized;
+  } catch {
+    /* 没有配置文件就用默认值 */
+  }
+
   mainWindow = new BrowserWindow({
     width: 1320,
     height: 860,
@@ -91,7 +104,9 @@ function createWindow() {
 
   /* 默认以最大化打开（先最大化再显示，避免先闪一下小窗口） */
   mainWindow.once("ready-to-show", () => {
-    mainWindow.maximize();
+    if (startMaximized)
+      mainWindow.maximize();
+
     mainWindow.show();
     /* 主窗口出来了，启动卡片可以收掉 */
     splash?.close();
@@ -112,6 +127,35 @@ function createWindow() {
 }
 
 function registerIpc() {
+  /*
+   * 客户端设置（字体、表格、编辑器等）落到 userData/settings.json，
+   * 由主进程负责读写：渲染层的 localStorage 只作为首次绘制的兜底。
+   */
+  const settingsFile = () => path.join(app.getPath("userData"), "settings.json");
+
+  ipcMain.handle("valkyrie:settings-load", async () => {
+    try {
+      return JSON.parse(fs.readFileSync(settingsFile(), "utf8"));
+    } catch {
+      return {};
+    }
+  });
+
+  ipcMain.handle("valkyrie:settings-save", async (_event, settings) => {
+    try {
+      const target = settingsFile();
+
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      /* 先写临时文件再改名，避免写一半被打断留下坏配置 */
+      fs.writeFileSync(`${target}.tmp`, JSON.stringify(settings, null, 2), "utf8");
+      fs.renameSync(`${target}.tmp`, target);
+      return true;
+    } catch (error) {
+      process.stderr.write(`[valkyrie] 设置保存失败: ${error && error.message}\n`);
+      return false;
+    }
+  });
+
   ipcMain.handle("valkyrie:invoke", async (_event, method, params) => {
     try {
       return { ok: true, result: await bridge.call(method, params || {}) };

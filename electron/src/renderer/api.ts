@@ -169,6 +169,9 @@ declare global {
       showMessage?: (options: MessageOptions) => Promise<number>;
       showMenu?: (options: { items: NativeMenuItem[] }) => Promise<string | null>;
       setNativeTheme?: (theme: string) => Promise<boolean>;
+      /** 客户端设置：主进程负责写 userData/settings.json */
+      loadSettings?: () => Promise<Record<string, unknown>>;
+      saveSettings?: (settings: Record<string, unknown>) => Promise<boolean>;
     };
   }
 }
@@ -231,6 +234,16 @@ export function showMenu(items: NativeMenuItem[]): Promise<string | null> {
 /** 让原生菜单 / 系统对话框跟随应用主题 */
 export function setNativeTheme(theme: string): Promise<boolean> {
   return window.valkyrie?.setNativeTheme?.(theme) ?? Promise.resolve(false);
+}
+
+/** 从主进程读客户端设置（userData/settings.json） */
+export function loadSettingsFile(): Promise<Record<string, unknown>> {
+  return window.valkyrie?.loadSettings?.() ?? Promise.resolve({});
+}
+
+/** 把客户端设置写回主进程的配置文件 */
+export function saveSettingsFile(settings: Record<string, unknown>): Promise<boolean> {
+  return window.valkyrie?.saveSettings?.(settings) ?? Promise.resolve(false);
 }
 
 export function messageOf(error: unknown): string {
