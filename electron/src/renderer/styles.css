@@ -65,6 +65,9 @@
   --icon-teal: light-dark(#0d9488, #2dd4bf);
   /* 气泡的投影：弹出动画里和黄圈叠加使用 */
   --bubble-shadow: 0 16px 40px light-dark(rgba(15, 23, 42, .18), rgba(1, 4, 9, .65));
+  /* 滚动条滑块（细滚动条用） */
+  --scroll-thumb: light-dark(rgba(15, 23, 42, .22), rgba(230, 237, 243, .2));
+  --scroll-thumb-hover: light-dark(rgba(15, 23, 42, .36), rgba(230, 237, 243, .34));
   --mono: Consolas, "Cascadia Mono", "Courier New", monospace;
 
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
@@ -88,6 +91,38 @@ body {
 button { font: inherit; color: inherit; }
 input { font: inherit; color: inherit; }
 input, textarea, .console, .pre-wrap { user-select: text; }
+
+/*
+ * 细滚动条：Chromium 在 Windows 上默认的滚动条有 15px 还带箭头，放在数据区里太抢眼。
+ * 统一收窄到 10px，滑块用半透明灰并靠 padding-box 留出上下留白，悬停时加深。
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  /* 透明边框 + padding-box：视觉上只剩中间一条细滑块 */
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background: var(--scroll-thumb);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+  background-clip: padding-box;
+}
 
 /* ------------------------------ 外壳 ------------------------------ */
 

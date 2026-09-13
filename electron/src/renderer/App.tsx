@@ -475,6 +475,8 @@ export function App() {
       lineHeight: 20,
       lineNumbersMinChars: 3,
       scrollBeyondLastLine: false,
+      /* 滚动条收细，和界面其它区域保持一致 */
+      scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10, useShadows: false },
       renderLineHighlight: "line",
       /* 右键菜单换成 FX 版那套（自己接管），关掉 Monaco 内置的 */
       contextmenu: false,
