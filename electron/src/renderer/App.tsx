@@ -3212,8 +3212,8 @@ export function App() {
       if (target?.closest?.(".editor"))
         return;
 
-      /* Ctrl+C：结果表有选区就复制成「制表符分隔」，粘到 Excel 直接分格 */
-      if (!shift && key === "c") {
+      /* Ctrl+C / Ctrl+Insert：结果表有选区就复制成「制表符分隔」，粘到 Excel 直接分格 */
+      if (!shift && (key === "c" || key === "insert")) {
         if (!target?.closest?.("input, textarea") && gridCopyRef.current())
           event.preventDefault();
 
