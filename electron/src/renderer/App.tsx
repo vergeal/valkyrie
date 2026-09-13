@@ -504,29 +504,6 @@ export function App() {
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeTabId, tabsSignature]);
 
-  /* 选项：编辑器字号 / 自动换行 / 智能提示 */
-  useEffect(() => {
-    const editor = editorRef.current;
-
-    if (!editor)
-      return;
-
-    editor.updateOptions({
-      fontSize: settings.editorFontSize,
-      lineHeight: Math.round(settings.editorFontSize * 1.45),
-      fontFamily: `"${settings.editorFontFamily}", Consolas, "Courier New", monospace`,
-      wordWrap: settings.editorWordWrap ? "on" : "off",
-      lineNumbers: settings.editorLineNumbers ? "on" : "off",
-      tabSize: settings.editorTabSize,
-      minimap: { enabled: settings.editorMinimap },
-      quickSuggestions: settings.suggestEnabled ? { other: true, comments: false, strings: false } : false,
-      suggestOnTriggerCharacters: settings.suggestEnabled
-    });
-  }, [
-    settings.editorFontSize, settings.editorFontFamily, settings.editorWordWrap, settings.suggestEnabled,
-    settings.editorLineNumbers, settings.editorTabSize, settings.editorMinimap
-  ]);
-
   useEffect(() => {
     if (!editorContainer.current || editorRef.current)
       return;
@@ -536,9 +513,14 @@ export function App() {
       language: "sql",
       theme: "vs",
       automaticLayout: true,
-      minimap: { enabled: false },
-      fontSize: 14,
-      lineHeight: 20,
+      /* 创建时就带上选项里的编辑器配置（不能写死：否则启动时要等选项变动才会生效） */
+      minimap: { enabled: settings.editorMinimap },
+      fontSize: settings.editorFontSize,
+      lineHeight: Math.round(settings.editorFontSize * 1.45),
+      fontFamily: `"${settings.editorFontFamily}", Consolas, "Courier New", monospace`,
+      lineNumbers: settings.editorLineNumbers ? "on" : "off",
+      tabSize: settings.editorTabSize,
+      wordWrap: settings.editorWordWrap ? "on" : "off",
       lineNumbersMinChars: 3,
       scrollBeyondLastLine: false,
       /* 滚动条收细，和界面其它区域保持一致 */
@@ -547,8 +529,8 @@ export function App() {
       /* 右键菜单换成 FX 版那套（自己接管），关掉 Monaco 内置的 */
       contextmenu: false,
       /* 补全走 Monaco 内置弹窗；候选由下面注册的 Provider 提供 */
-      quickSuggestions: { other: true, comments: false, strings: false },
-      suggestOnTriggerCharacters: true,
+      quickSuggestions: settings.suggestEnabled ? { other: true, comments: false, strings: false } : false,
+      suggestOnTriggerCharacters: settings.suggestEnabled,
       wordBasedSuggestions: "off",
       suggest: { showWords: false, showSnippets: true, preview: true },
       padding: { top: 6 }
@@ -631,6 +613,34 @@ export function App() {
       editorRef.current = null;
     };
   }, []);
+
+  /*
+   * 选项里的编辑器配置：声明在创建之后。
+   * 挂载时先创建（带上当前选项），随后启动读盘校准的设置若与首屏不同，
+   * 这个 effect 会因为依赖变化再应用一次。
+   */
+  useEffect(() => {
+    const editor = editorRef.current;
+
+    if (!editor)
+      return;
+
+    editor.updateOptions({
+      fontSize: settings.editorFontSize,
+      lineHeight: Math.round(settings.editorFontSize * 1.45),
+      fontFamily: `"${settings.editorFontFamily}", Consolas, "Courier New", monospace`,
+      wordWrap: settings.editorWordWrap ? "on" : "off",
+      lineNumbers: settings.editorLineNumbers ? "on" : "off",
+      tabSize: settings.editorTabSize,
+      minimap: { enabled: settings.editorMinimap },
+      quickSuggestions: settings.suggestEnabled ? { other: true, comments: false, strings: false } : false,
+      suggestOnTriggerCharacters: settings.suggestEnabled
+    });
+    editor.layout();
+  }, [
+    settings.editorFontSize, settings.editorFontFamily, settings.editorWordWrap, settings.suggestEnabled,
+    settings.editorLineNumbers, settings.editorTabSize, settings.editorMinimap
+  ]);
 
   /* 编辑器内容与当前标签同步 */
   useEffect(() => {
