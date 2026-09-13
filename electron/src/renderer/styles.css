@@ -1172,9 +1172,26 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
   overflow: hidden;
 }
 
+/* 标签条本体：可横向滚动（滚轮直接滚），滚动条藏起来靠右侧折叠菜单导航 */
+.work-tabs-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.work-tabs-strip::-webkit-scrollbar { display: none; }
+
 .work-tab {
   display: inline-flex;
   align-items: center;
+  /* 标签多了先按比例收缩，缩到 104px 之后再溢出（触发折叠菜单） */
+  flex: 0 1 auto;
+  min-width: 104px;
   max-width: 210px;
   border: 1px solid transparent;
   border-bottom: 0;
@@ -1184,6 +1201,15 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
 }
 
 .work-tab:hover { background: var(--hover); color: var(--text); }
+
+/* 拖动排序：被拖的那一项半透明，落点用左侧一条强调色标出来 */
+.work-tab.is-dragging { opacity: .45; }
+.work-tab.is-drop-target { box-shadow: inset 2px 0 0 var(--accent); }
+.work-tab.is-drop-target.is-drop-after { box-shadow: inset -2px 0 0 var(--accent); }
+
+/* 标签折叠菜单按钮：和「新建」按钮并排，常驻不滚动 */
+.work-tabs-more { color: var(--muted); }
+.work-tabs-more:hover { color: var(--text); }
 .work-tab.is-active {
   background: var(--panel);
   border-color: var(--line);

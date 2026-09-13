@@ -225,6 +225,10 @@ export function App() {
   /* 启动时不预置标签，关闭后也不会自动补一个 */
   const [tabs, setTabs] = useState<WorkTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string>("");
+  /* 标签栏：拖动排序的中转状态 + 是否溢出（溢出时显示折叠菜单） */
+  const [tabDrag, setTabDrag] = useState<{ id: string; over: string | null; after: boolean } | null>(null);
+  const [tabsOverflow, setTabsOverflow] = useState(false);
+  const tabsRef = useRef<HTMLDivElement | null>(null);
   const [resultPane, setResultPane] = useState<ResultPane>("grid");
   const [treeFilter, setTreeFilter] = useState("");
   const [catalogOptions, setCatalogOptions] = useState<SchemaNode[]>([]);
@@ -444,6 +448,35 @@ export function App() {
     root.setProperty("--ui-font-size", `${settings.uiFontSize}px`);
     root.setProperty("--grid-font-size", `${settings.gridFontSize}px`);
   }, [settings.uiFontSize, settings.gridFontSize]);
+
+  /* 标签条内容超出可视宽度 → 显示右侧的折叠菜单 */
+  const tabsSignature = tabs.map(tab => tab.title).join("\u0001");
+
+  useEffect(() => {
+    const element = tabsRef.current;
+
+    if (!element)
+      return;
+
+    const check = () => setTabsOverflow(element.scrollWidth > element.clientWidth + 1);
+    const observer = new ResizeObserver(check);
+
+    check();
+    observer.observe(element);
+    window.addEventListener("resize", check);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", check);
+    };
+  }, [tabsSignature]);
+
+  /* 切标签时把它滚进可视范围，标签多的时候也能看到当前页 */
+  useEffect(() => {
+    tabsRef.current
+      ?.querySelector<HTMLElement>(`[data-tab-id="${activeTabId}"]`)
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeTabId, tabsSignature]);
 
   /* 选项：编辑器字号 / 自动换行 / 智能提示 */
   useEffect(() => {
@@ -1113,6 +1146,57 @@ export function App() {
 
   function closeTab(id: string) {
     void closeTabs("current", id);
+  }
+
+  /** 工作标签的图标名（标签栏与溢出折叠菜单共用） */
+  function tabIconName(tab: WorkTab): string {
+    if (tab.kind === "query")
+      return "terminal";
+
+    if (tab.kind === "data")
+      return "table";
+
+    if (tab.kind === "objects")
+      return tab.view === "scripts" ? "code" : "list";
+
+    return "columns";
+  }
+
+  /**
+   * 拖动排序：把 from 放到 to 的前面或后面（按落点在标签的哪半边决定）；
+   * 「对象」列钉在最前面，既不能被拖走，也不允许别人插到它前面。
+   */
+  function moveTab(from: string, to: string, after: boolean) {
+    if (from === to)
+      return;
+
+    setTabs(previous => {
+      const dragged = previous.find(tab => tab.id === from);
+
+      if (!dragged || dragged.kind === "objects")
+        return previous;
+
+      const pinned = previous.filter(tab => tab.kind === "objects");
+      const movable = previous.filter(tab => tab.kind !== "objects");
+      const fromIndex = movable.findIndex(tab => tab.id === from);
+
+      if (fromIndex < 0)
+        return previous;
+
+      const next = [...movable];
+
+      next.splice(fromIndex, 1);
+
+      /* 先删掉被拖的那项再找落点，索引才是准的 */
+      const targetIndex = next.findIndex(tab => tab.id === to);
+
+      if (targetIndex < 0)
+        return previous;
+
+      next.splice(after ? targetIndex + 1 : targetIndex, 0, dragged);
+
+      return [...pinned, ...next];
+    });
   }
 
   function openTableData(node: SchemaNode) {
@@ -3118,11 +3202,65 @@ export function App() {
         <Panel id="work" className="work-panel" minSize="30%">
         <main className="work-main">
           <div className={`work-tabs${tabs.length === 0 ? " is-hidden" : ""}`}>
+            {/* 标签条：可横向滚动（滚轮 / 拖动排序），右边固定「新建」与溢出折叠菜单 */}
+            <div
+              className="work-tabs-strip"
+              ref={tabsRef}
+              onWheel={event => {
+                /* 滚轮在标签栏上直接横向滚动，不用按住 Shift */
+                if (event.deltaY)
+                  event.currentTarget.scrollLeft += event.deltaY;
+              }}
+            >
             {tabs.map(tab => (
               <div
                 key={tab.id}
                 data-tab-id={tab.id}
-                className={`work-tab${tab.id === activeTabId ? " is-active" : ""}`}
+                /* 「对象」列钉在最前面，不允许拖动 */
+                draggable={tab.kind !== "objects"}
+                className={[
+                  "work-tab",
+                  tab.id === activeTabId ? "is-active" : "",
+                  tabDrag?.id === tab.id ? "is-dragging" : "",
+                  tabDrag?.over === tab.id ? "is-drop-target" : "",
+                  tabDrag?.over === tab.id && tabDrag.after ? "is-drop-after" : ""
+                ].filter(Boolean).join(" ")}
+                onDragStart={event => {
+                  if (tab.kind === "objects") {
+                    event.preventDefault();
+                    return;
+                  }
+
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", tab.id);
+                  setTabDrag({ id: tab.id, over: null, after: false });
+                }}
+                onDragOver={event => {
+                  if (!tabDrag || tabDrag.id === tab.id)
+                    return;
+
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const after = event.clientX > rect.left + rect.width / 2;
+
+                  setTabDrag(previous => previous ? { ...previous, over: tab.id, after } : previous);
+                }}
+                onDragLeave={() => setTabDrag(previous =>
+                  previous && previous.over === tab.id ? { ...previous, over: null } : previous)}
+                onDrop={event => {
+                  event.preventDefault();
+                  const from = event.dataTransfer.getData("text/plain") || tabDrag?.id;
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const after = event.clientX > rect.left + rect.width / 2;
+
+                  setTabDrag(null);
+
+                  if (from)
+                    moveTab(from, tab.id, after);
+                }}
+                onDragEnd={() => setTabDrag(null)}
                 onContextMenu={event => {
                   event.preventDefault();
                   void popupNativeMenu(buildTabMenuEntries(tab.id));
@@ -3142,10 +3280,7 @@ export function App() {
                   title={tab.title}
                 >
                   <Icon
-                    name={tab.kind === "query" ? "terminal"
-                      : tab.kind === "data" ? "table"
-                        : tab.kind === "objects" ? (tab.view === "scripts" ? "code" : "list")
-                          : "columns"}
+                    name={tabIconName(tab)}
                     size={13}
                   />
                   <span className="work-tab-title">{tab.title}</span>
@@ -3165,9 +3300,28 @@ export function App() {
                 )}
               </div>
             ))}
+            </div>
+
             <button type="button" className="work-tab-add" aria-label="新建查询" onClick={createQueryTab}>
               <Icon name="plus" size={13} />
             </button>
+
+            {/* 标签超出宽度时折叠成这个菜单 */}
+            {tabsOverflow && (
+              <button
+                type="button"
+                className="work-tab-add work-tabs-more"
+                aria-label="全部标签"
+                title="全部标签"
+                onClick={() => void popupNativeMenu(tabs.map(tab => ({
+                  label: tab.id === activeTabId ? `● ${tab.title}` : tab.title,
+                  icon: tabIconName(tab),
+                  action: () => setActiveTabId(tab.id)
+                })))}
+              >
+                <Icon name="chevronsRight" size={13} />
+              </button>
+            )}
           </div>
 
           {tabs.length === 0 && (
