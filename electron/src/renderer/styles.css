@@ -794,14 +794,14 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
   35% {
     opacity: 1;
     transform: scale(1.02);
-    /* 鲜黄描边 + 外扩一圈光晕 */
-    border-color: #ffd60a;
-    box-shadow: 0 0 0 3px rgba(255, 214, 10, .85), var(--bubble-shadow);
+    /* 最鲜艳的纯黄描边 + 外扩一圈光晕 */
+    border-color: #ffff00;
+    box-shadow: 0 0 0 3px rgba(255, 255, 0, .9), var(--bubble-shadow);
   }
   70% {
     transform: scale(1);
-    border-color: rgba(255, 214, 10, .55);
-    box-shadow: 0 0 0 2px rgba(255, 214, 10, .3), var(--bubble-shadow);
+    border-color: rgba(255, 255, 0, .6);
+    box-shadow: 0 0 0 2px rgba(255, 255, 0, .35), var(--bubble-shadow);
   }
   100% {
     opacity: 1;
@@ -811,10 +811,19 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
   }
 }
 
-/* 三角箭头跟着一起亮一下，和气泡边框连成一条黄边 */
+/*
+ * 三角箭头跟着亮：边框和**内部**一起填成纯黄，整只三角是实心的，
+ * 而不是只亮两条边留下空心的尖角；动画结束回到与卡片同色（看不出来）。
+ */
 @keyframes bubble-arrow-pop {
-  0%, 100% { border-color: var(--line); }
-  35%, 62% { border-color: #ffd60a; }
+  0%, 100% {
+    border-color: var(--line);
+    background: var(--overlay);
+  }
+  35%, 62% {
+    border-color: #ffff00;
+    background: #ffff00;
+  }
 }
 
 /* 系统开了「减弱动态效果」就不做动画 */
