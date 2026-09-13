@@ -814,7 +814,8 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
 /* 锚点：尺寸由里面的卡片撑开，三角箭头绝对定位在贴向单元格的那条边上 */
 .cell-bubble-anchor {
   position: fixed;
-  z-index: 40;
+  /* 挂到 body 之后就是顶层元素：压过分隔条（z-index 5），但仍在模态框（60）之下 */
+  z-index: 55;
   /* 明确声明不是窗口拖动区：气泡里的按下 / 拖拽都属于气泡自己 */
   -webkit-app-region: no-drag;
 }
@@ -2486,3 +2487,15 @@ table.script-list .table-name { min-width: 200px; max-width: 520px; }
 /* 下拉框禁用：图标与品牌 logo 同样压成灰 */
 .app .vk-select-btn:disabled svg { color: var(--muted); }
 .app .vk-select-btn:disabled .db-logo { filter: grayscale(1) opacity(.55); }
+
+/* 气泡用 portal 挂在 body 上，不在 .app 里，禁用态单独补一份 */
+.cell-bubble .mini-btn:disabled,
+.cell-bubble .mini-btn:disabled.is-default {
+  color: var(--muted);
+  border-color: var(--line);
+  background: transparent;
+  opacity: .55;
+  cursor: default;
+}
+
+.cell-bubble .mini-btn:disabled svg { color: var(--muted); }

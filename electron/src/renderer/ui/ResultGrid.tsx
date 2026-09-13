@@ -6,6 +6,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode
 } from "react";
+import { createPortal } from "react-dom";
 import { isNumericType, type QueryColumn } from "../api";
 import { KEY } from "../keys";
 import { DateTimePicker } from "./DateTimePicker";
@@ -779,8 +780,12 @@ export function ResultGrid(props: ResultGridProps) {
 
       {rows.length === 0 && <div className="empty">没有数据</div>}
 
-      {/* 编辑气泡：贴着单元格上方或下方浮出，⌘/Ctrl+Enter 保存、Esc 取消 */}
-      {bubbleMode && editing && bubbleSize && bubblePos && (
+      {/*
+        * 编辑气泡：贴着单元格上方或下方浮出，⌘/Ctrl+Enter 保存、Esc 取消。
+        * 用 portal 挂到 body：面板会形成自己的层叠上下文，气泡留在面板里时，
+        * 面板边缘的分隔条（splitter，z-index 5）会盖在气泡上面把鼠标抢走。
+        */}
+      {bubbleMode && editing && bubbleSize && bubblePos && createPortal((
         <div
           className={`cell-bubble-anchor is-${bubblePos.placement}`}
           ref={bubbleRef}
@@ -895,7 +900,7 @@ export function ResultGrid(props: ResultGridProps) {
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
     </div>
   );
 }
