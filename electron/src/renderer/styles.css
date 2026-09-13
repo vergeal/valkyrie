@@ -1600,14 +1600,22 @@ table.grid .is-null { color: var(--muted); font-style: italic; }
 /* 不给悬停加底色：只有用户点选/框选后才出现背景 */
 
 /*
- * 占位列：本身不参与交互（不响应点击、不参与列选中），只负责把这一行的
- * 底色（斑马纹 / 当前行 / 脏数据 / 整行选中）延伸到容器右边缘。
+ * 占位列：只为把表格撑到容器宽度，本身没有内容 —— 不响应点击、不参与列选中，
+ * 也不承接任何行底色（斑马纹 / 当前行 / 脏数据 / 选中），右侧空白保持干净。
  */
-table.grid .grid-filler {
+table.grid tbody tr td.grid-filler {
   width: auto;
   padding: 0;
   border: 0;
+  background: transparent;
   pointer-events: none;
+}
+
+/* 行级底色（当前行 / 脏数据 / 框选）同样不许铺到没有内容的占位列上 */
+table.grid tbody tr.is-row-active td.grid-filler,
+table.grid tbody tr.is-dirty td.grid-filler,
+table.grid tbody tr td.grid-filler.is-range {
+  background: transparent;
 }
 
 /* 刷新反馈：整张表（含列头）先消失一瞬，再随新数据出现（像重新载入） */

@@ -763,11 +763,8 @@ export function ResultGrid(props: ResultGridProps) {
                     </td>
                   );
                 })}
-                {/* 占位列：斑马纹 / 当前行 / 脏数据 / 整行选中的底色一起铺满整行 */}
-                <td
-                  className={`grid-filler${rowMode && bounds && rowIndex >= bounds.r1 && rowIndex <= bounds.r2 ? " is-range" : ""}`}
-                  aria-hidden="true"
-                />
+                {/* 占位列：只为撑满宽度，本身没有内容也不上任何底色 */}
+                <td className="grid-filler" aria-hidden="true" />
               </tr>
             );
           })}
