@@ -846,6 +846,25 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
 
 .cell-bubble-input:focus { border-color: var(--accent); }
 
+/* 时间类字段的选择器：单行、等宽，和表格里的时间文本对齐 */
+.cell-bubble-picker {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--grid-font-size, 14px);
+  outline: none;
+}
+
+.cell-bubble-picker:focus { border-color: var(--accent); }
+
+/* 深色主题下把原生日期图标反相，否则黑图标糊在深底上 */
+.app.is-dark .cell-bubble-picker::-webkit-calendar-picker-indicator { filter: invert(.85); }
+
 .cell-bubble-actions {
   display: flex;
   align-items: center;

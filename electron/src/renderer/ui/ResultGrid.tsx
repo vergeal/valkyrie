@@ -52,6 +52,90 @@ const MEASURE_CHARS = 60;
 
 let measureContext: CanvasRenderingContext2D | null = null;
 
+/** 气泡编辑器的类型：多行文本 / 日期 / 日期时间 / 时间 */
+type BubbleMode = "text" | "date" | "datetime" | "time";
+
+/**
+ * 判断字段是不是时间类：各数据库命名不同（DATE / DATETIME / TIMESTAMP[TZ] /
+ * TIME[TZ] / SMALLDATETIME…），命中就在气泡里给日期时间选择器。
+ */
+function timeKindOf(type: string | undefined): "date" | "datetime" | "time" | null {
+  const lower = (type ?? "").toLowerCase();
+
+  if (!lower)
+    return null;
+
+  if (lower.includes("timestamp") || lower.includes("datetime"))
+    return "datetime";
+
+  if (/(^|\W)time(\W|$)/.test(lower))
+    return "time";
+
+  if (/(^|\W)date(\W|$)/.test(lower))
+    return "date";
+
+  return null;
+}
+
+/** 单元格里的时间文本 → 选择器要的值（宽松解析：容忍 T 分隔符与毫秒） */
+function toPickerValue(value: string, kind: "date" | "datetime" | "time"): string {
+  const date = /^(\d{4}-\d{2}-\d{2})/.exec(value.trim());
+  /* 只认「开头 / 空格 / T」后面的 HH:MM[:SS]，避免把 MySQL 的 838:59:59 这类超长 TIME 误解析 */
+  const time = /(?:^|\s|T)(\d{1,2}:\d{2})(?::(\d{2}))?/.exec(value);
+  const datePart = date ? date[1] : "";
+  const timePart = time ? `${time[1]}:${time[2] ?? "00"}` : "";
+
+  if (kind === "date")
+    return datePart;
+
+  if (kind === "time")
+    return timePart;
+
+  return datePart && timePart ? `${datePart}T${timePart}` : "";
+}
+
+/**
+ * 选择器值 → 写回数据库的文本。
+ * 原值带毫秒且秒没被改动时保留毫秒，避免选一次日期就把 .123 抹掉。
+ */
+function fromPickerValue(picked: string, kind: "date" | "datetime" | "time", original: string): string {
+  if (kind === "date")
+    return picked;
+
+  if (kind === "time")
+    return picked.length === 5 ? `${picked}:00` : picked;
+
+  const normalized = picked.replace("T", " ");
+  const fraction = /\.\d+/.exec(original)?.[0] ?? "";
+  const unchanged = normalized.slice(0, 19) === toPickerValue(original, "datetime").replace("T", " ");
+
+  return fraction && unchanged ? `${normalized}${fraction}` : normalized;
+}
+
+/** 气泡标题后缀 */
+const BUBBLE_LABEL: Record<BubbleMode, string> = {
+  text: "多行编辑",
+  date: "日期",
+  datetime: "日期时间",
+  time: "时间"
+};
+
+/** 「现在」按钮：按模式给出当前日期 / 日期时间 / 时间的控件值 */
+function nowFor(kind: "date" | "datetime" | "time"): string {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
+  if (kind === "date")
+    return date;
+
+  if (kind === "time")
+    return time;
+
+  return `${date}T${time}`;
+}
+
 /**
  * 命中高亮：按纯子串、忽略大小写把文本切段，命中片段套 `mark`（黄底深字）。
  * 逻辑对齐 FX 版 SearchHighlight.flow，只是这里返回的是 React 节点。
@@ -137,8 +221,8 @@ export function ResultGrid(props: ResultGridProps) {
   const [focus, setFocus] = useState<CellRef | null>(null);
   const [editing, setEditing] = useState<CellRef | null>(null);
   const [draft, setDraft] = useState("");
-  /* 多行文本走气泡里的多行编辑器（单行仍在单元格内联编辑） */
-  const [bubbleEdit, setBubbleEdit] = useState(false);
+  /* 气泡编辑：多行文本 / 日期时间选择；null 表示走单元格内的内联输入框 */
+  const [bubbleMode, setBubbleMode] = useState<BubbleMode | null>(null);
   /* 尺寸只在打开时算一次：之后用户可以自由缩放，滚动重定位不覆盖它 */
   const [bubbleSize, setBubbleSize] = useState<{ width: number; height: number } | null>(null);
   const [bubblePos, setBubblePos] = useState<{
@@ -171,12 +255,13 @@ export function ResultGrid(props: ResultGridProps) {
   /* 刚拖过列宽时忽略随后的 click，避免误触发"选中整列" */
   const lastResizeAt = useRef(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const pickerRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!editing)
       return;
 
-    if (bubbleEdit) {
+    if (bubbleMode === "text") {
       const area = textareaRef.current;
 
       area?.focus();
@@ -185,8 +270,13 @@ export function ResultGrid(props: ResultGridProps) {
       return;
     }
 
+    if (bubbleMode) {
+      pickerRef.current?.focus();
+      return;
+    }
+
     inputRef.current?.focus();
-  }, [editing, bubbleEdit]);
+  }, [editing, bubbleMode]);
 
   /*
    * 气泡定位：贴着正在编辑的单元格浮出 —— 下方放得下就放下方，放不下翻到上方，
@@ -194,7 +284,7 @@ export function ResultGrid(props: ResultGridProps) {
    * 表格内部滚动、窗口缩放、气泡被手动缩放时都重新贴一次。
    */
   useLayoutEffect(() => {
-    if (!bubbleEdit || !editing) {
+    if (!bubbleMode || !editing) {
       setBubblePos(null);
       return;
     }
@@ -240,7 +330,7 @@ export function ResultGrid(props: ResultGridProps) {
       window.removeEventListener("scroll", place, true);
       window.removeEventListener("resize", place);
     };
-  }, [bubbleEdit, editing, bubbleSize]);
+  }, [bubbleMode, editing, bubbleSize]);
 
   interface BubblePos {
     top: number;
@@ -266,24 +356,25 @@ export function ResultGrid(props: ResultGridProps) {
     return { top: Math.round(top), left: Math.round(left), arrow, placement };
   }
 
-  /* 打开多行气泡：尺寸与位置立刻算好，不用等气泡渲染出来（否则首帧没得量） */
-  function openBubble(value: string, cell?: HTMLElement) {
+  /* 打开气泡：尺寸与位置立刻算好，不用等气泡渲染出来（否则首帧没得量） */
+  function openBubble(mode: BubbleMode, value: string, cell?: HTMLElement) {
     const rect = cell?.getBoundingClientRect()
       ?? wrapRef.current?.querySelector("td.is-editing")?.getBoundingClientRect();
-    const size = bubbleSizeFor(value, rect?.width);
+    const size = bubbleSizeFor(mode, value, rect?.width);
 
-    setBubbleEdit(true);
+    setBubbleMode(mode);
     setBubbleSize(size);
     setBubblePos(rect ? placeBubble(rect, size) : null);
   }
 
-  /** 气泡的初始尺寸：宽度跟单元格走，高度按行数估一个合适值（之后用户可自由缩放） */
-  function bubbleSizeFor(value: string, cellWidth?: number) {
-    const lines = value.split("\n").length;
+  /** 气泡的初始尺寸：宽度跟单元格走，高度按内容估一个合适值（之后用户可自由缩放） */
+  function bubbleSizeFor(mode: BubbleMode, value: string, cellWidth?: number) {
+    /* 多行文本按行数估高度，时间选择器只要一行 */
+    const content = mode === "text" ? value.split("\n").length * 21 + 116 : 132;
 
     return {
       width: Math.round(Math.min(460, Math.max(320, cellWidth ?? 320))),
-      height: Math.round(Math.min(360, Math.max(180, lines * 21 + 116)))
+      height: Math.round(Math.min(360, Math.max(mode === "text" ? 180 : 150, content)))
     };
   }
 
@@ -418,16 +509,19 @@ export function ResultGrid(props: ResultGridProps) {
 
     const value = rows[cell.row]?.[cell.col] ?? "";
     const multiline = value.includes("\n");
+    const timeKind = timeKindOf(columns[cell.col]?.type);
 
     committing.current = false;
     setEditing(cell);
     setDraft(value);
 
-    /* 含换行的文本用气泡里的多行编辑器 */
+    /* 含换行的文本用多行编辑器；时间类字段用气泡里的日期时间选择器 */
     if (multiline)
-      openBubble(value, cellElement);
+      openBubble("text", value, cellElement);
+    else if (timeKind)
+      openBubble(timeKind, value, cellElement);
     else
-      setBubbleEdit(false);
+      setBubbleMode(null);
   }
 
   function commitEdit() {
@@ -441,7 +535,7 @@ export function ResultGrid(props: ResultGridProps) {
       onCellCommit?.(editing.row, editing.col, draft);
 
     setEditing(null);
-    setBubbleEdit(false);
+    setBubbleMode(null);
     setBubbleSize(null);
     setBubblePos(null);
   }
@@ -449,7 +543,7 @@ export function ResultGrid(props: ResultGridProps) {
   /** 放弃这次编辑（Escape / 气泡上的取消按钮） */
   function cancelEdit() {
     setEditing(null);
-    setBubbleEdit(false);
+    setBubbleMode(null);
     setBubbleSize(null);
     setBubblePos(null);
   }
@@ -459,11 +553,11 @@ export function ResultGrid(props: ResultGridProps) {
   commitRef.current = commitEdit;
 
   /* 内联输入框失焦提交要用 ref 判断：切到气泡那一次渲染后输入框会卸载 */
-  const bubbleEditRef = useRef(false);
-  bubbleEditRef.current = bubbleEdit;
+  const bubblingRef = useRef(false);
+  bubblingRef.current = bubbleMode !== null;
 
   useEffect(() => {
-    if (!bubbleEdit || !editing)
+    if (!bubbleMode || !editing)
       return;
 
     const onMouseDown = (event: MouseEvent) => {
@@ -475,7 +569,7 @@ export function ResultGrid(props: ResultGridProps) {
 
     window.addEventListener("mousedown", onMouseDown, true);
     return () => window.removeEventListener("mousedown", onMouseDown, true);
-  }, [bubbleEdit, editing]);
+  }, [bubbleMode, editing]);
 
   /**
    * 单元格左键按下：无论当前是否在编辑、是否有菜单打开，
@@ -620,7 +714,7 @@ export function ResultGrid(props: ResultGridProps) {
                         onContextMenu?.();
                       }}
                     >
-                      {isEditing && !bubbleEdit ? (
+                      {isEditing && !bubbleMode ? (
                         <input
                           ref={inputRef}
                           className="cell-editor"
@@ -636,7 +730,7 @@ export function ResultGrid(props: ResultGridProps) {
                                 const next = `${draft}\n`;
 
                                 setDraft(next);
-                                openBubble(next);
+                                openBubble("text", next);
                                 return;
                               }
 
@@ -647,7 +741,7 @@ export function ResultGrid(props: ResultGridProps) {
                             }
                           }}
                           /* 切到气泡时输入框会卸载，别把这次切换当成失焦提交 */
-                          onBlur={() => { if (!bubbleEditRef.current) commitEdit(); }}
+                          onBlur={() => { if (!bubblingRef.current) commitEdit(); }}
                         />
                       ) : (cell === null ? "NULL" : highlight(String(cell), keyword))}
                     </td>
@@ -672,8 +766,8 @@ export function ResultGrid(props: ResultGridProps) {
 
       {rows.length === 0 && <div className="empty">没有数据</div>}
 
-      {/* 多行编辑气泡：贴着单元格上方或下方浮出，⌘/Ctrl+Enter 保存、Esc 取消 */}
-      {bubbleEdit && editing && bubbleSize && bubblePos && (
+      {/* 编辑气泡：贴着单元格上方或下方浮出，⌘/Ctrl+Enter 保存、Esc 取消 */}
+      {bubbleMode && editing && bubbleSize && bubblePos && (
         <div
           className={`cell-bubble-anchor is-${bubblePos.placement}`}
           ref={bubbleRef}
@@ -685,33 +779,81 @@ export function ResultGrid(props: ResultGridProps) {
 
           <div className="cell-bubble" style={{ width: bubbleSize.width, height: bubbleSize.height }}>
             <div className="cell-bubble-head">
-              <span className="cell-bubble-title">{columns[editing.col]?.label ?? "单元格"} · 多行编辑</span>
-              <span className="cell-bubble-hint">Enter 换行 · {KEY.runEnter} 保存 · Esc 取消</span>
+              <span className="cell-bubble-title">
+                {columns[editing.col]?.label ?? "单元格"} · {BUBBLE_LABEL[bubbleMode]}
+              </span>
+              <span className="cell-bubble-hint">
+                {bubbleMode === "text" ? "Enter 换行 · " : ""}{KEY.runEnter} 保存 · Esc 取消
+              </span>
             </div>
 
-            <textarea
-              ref={textareaRef}
-              className="cell-bubble-input"
-              value={draft}
-              spellCheck={false}
-              aria-label="多行编辑单元格"
-              onChange={event => setDraft(event.target.value)}
-              onKeyDown={event => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  cancelEdit();
-                } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-                  event.preventDefault();
-                  commitEdit();
-                }
-              }}
-            />
+            {bubbleMode === "text" ? (
+              <textarea
+                ref={textareaRef}
+                className="cell-bubble-input"
+                value={draft}
+                spellCheck={false}
+                aria-label="多行编辑单元格"
+                onChange={event => setDraft(event.target.value)}
+                onKeyDown={event => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelEdit();
+                  } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                    event.preventDefault();
+                    commitEdit();
+                  }
+                }}
+              />
+            ) : (
+              /* 时间类字段：原生日期 / 日期时间 / 时间选择器，秒级精度 */
+              <input
+                ref={pickerRef}
+                className="cell-bubble-picker"
+                type={bubbleMode === "date" ? "date" : bubbleMode === "time" ? "time" : "datetime-local"}
+                step={bubbleMode === "date" ? undefined : 1}
+                value={toPickerValue(draft, bubbleMode)}
+                aria-label={`选择${BUBBLE_LABEL[bubbleMode]}`}
+                onChange={event => setDraft(fromPickerValue(event.target.value, bubbleMode, draft))}
+                onKeyDown={event => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelEdit();
+                  } else if (event.key === "Enter") {
+                    event.preventDefault();
+
+                    /* 没选值不提交，避免把空串写进日期字段 */
+                    if (draft)
+                      commitEdit();
+                  }
+                }}
+              />
+            )}
 
             <div className="cell-bubble-actions">
-              <span className="cell-bubble-count">{draft.split("\n").length} 行 · {draft.length} 字符</span>
+              <span className="cell-bubble-count">
+                {bubbleMode === "text" ? `${draft.split("\n").length} 行 · ${draft.length} 字符` : (draft || "未选择")}
+              </span>
               <span className="tbtn-push" aria-hidden="true" />
+              {bubbleMode !== "text" && (
+                <button
+                  type="button"
+                  className="mini-btn"
+                  onClick={() => setDraft(fromPickerValue(nowFor(bubbleMode), bubbleMode, draft))}
+                >
+                  现在
+                </button>
+              )}
               <button type="button" className="mini-btn" onClick={cancelEdit}>取消</button>
-              <button type="button" className="mini-btn is-default" onClick={commitEdit}>保存</button>
+              <button
+                type="button"
+                className="mini-btn is-default"
+                /* 时间选择器没选值时不提交，避免把空串写进日期字段 */
+                disabled={bubbleMode !== "text" && !draft}
+                onClick={commitEdit}
+              >
+                保存
+              </button>
             </div>
           </div>
         </div>
