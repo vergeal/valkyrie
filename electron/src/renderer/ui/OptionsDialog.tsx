@@ -138,6 +138,8 @@ export function OptionsDialog(props: OptionsDialogProps) {
           sizeOptions(TAB_SIZE_OPTIONS, "空格")),
         check("editorWordWrap", "自动换行", "长语句折行显示，不用左右滚动"),
         check("editorLineNumbers", "显示行号", "编辑器左侧的行号栏"),
+        check("editorWhitespace", "显示空格与缩进标记", "缩进的空格画成点、制表符画成箭头，并画出缩进参考线（默认关闭）",
+          "whitespace 空白 空格 缩进 点 参考线"),
         check("editorMinimap", "显示缩略图", "右侧的代码缩略图（大文件时更耗性能）"),
         check("suggestEnabled", "智能提示", "关键字 / 表名 / 字段补全；快捷键可手动触发")
       ]

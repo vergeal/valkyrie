@@ -615,6 +615,30 @@ export function ResultGrid(props: ResultGridProps) {
     setFocus(cell);
   }
 
+  /**
+   * 点行号列表头（左上角 #）：整行模式选中当前显示的全部行。
+   *
+   * 走的是和行号列一样的「整行选区」，所以整行宽度、复制 / 导出 / 删除这些
+   * 按选区生效的动作都当成全选处理；搜索过滤时被隐藏的行不算在内。
+   */
+  function selectAllRows(event: ReactMouseEvent<HTMLElement>) {
+    if (event.button !== 0)
+      return;
+
+    event.preventDefault();
+
+    /* 正在编辑别的单元格：先提交再改选区（与拖选一致） */
+    if (editing)
+      commitEdit();
+
+    /* 不从左上角拉框：拖拽扩展交给行号列本身 */
+    dragging.current = false;
+    setRowMode(true);
+    setColMode(false);
+    setAnchor({ row: 0, col: 0 });
+    setFocus({ row: Math.max(0, rows.length - 1), col: Math.max(0, columns.length - 1) });
+  }
+
   if (columns.length === 0)
     return <div className="empty">执行结果将显示在这里</div>;
 
@@ -623,7 +647,7 @@ export function ResultGrid(props: ResultGridProps) {
       <table className={`grid${editable ? " is-editable" : ""}${refreshing ? " is-refreshing" : ""}`}>
         <thead>
           <tr>
-            <th className="rownum">#</th>
+            <th className="rownum" title="选中所有行" onMouseDown={selectAllRows}>#</th>
             {columns.map((column, index) => (
               <th
                 key={index}

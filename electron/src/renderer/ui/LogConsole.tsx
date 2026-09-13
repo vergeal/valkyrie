@@ -6,7 +6,7 @@
  * 序号 + 毫秒时间戳 + 类型标签 + 语句正文 + 行数/耗时指标，失败单独高亮。
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from "react";
 import type { ProgressEvent } from "../api";
 import { Icon } from "./icons";
 
@@ -326,6 +326,15 @@ export function LogConsole({ records, active, onClear, onCopy }: LogConsoleProps
   const [wrap, setWrap] = useState(true);
   const [follow, setFollow] = useState(true);
   const viewRef = useRef<HTMLDivElement | null>(null);
+  /*
+   * 程序自己贴底时写下的滚动位置，以及「下一次滚动事件是程序补发的」这个标记。
+   *
+   * 贴底会补发一次滚动事件（异步的，可能晚到几十毫秒）；批量执行日志时，
+   * 这些补发事件与新日志长高混在一起，按 atBottom 判断会把它们当成用户往上翻，
+   * 跟随开关被误关，面板于是停在原地、看起来一路往上滚。
+   */
+  const pinnedTopRef = useRef(-1);
+  const pinPendingRef = useRef(false);
 
   const batches = useMemo(() => buildBatches(records), [records]);
   const needle = keyword.trim();
@@ -350,32 +359,75 @@ export function LogConsole({ records, active, onClear, onCopy }: LogConsoleProps
 
   const filtered = scope !== "all" || needle.length > 0;
 
-  /* 有新日志时贴住底部；用户往上翻看历史后自动停跟，点「最新」恢复 */
-  useEffect(() => {
+  /** 贴到最底部，并记住这次是程序自己滚的 */
+  function pinToLatest() {
+    const element = viewRef.current;
+
+    if (!element)
+      return;
+
+    const before = element.scrollTop;
+
+    element.scrollTop = element.scrollHeight;
+    pinnedTopRef.current = element.scrollTop;
+
+    /* 位置真的动了才会补发事件；没动就别挂标记，免得吃掉用户的下一次滚动 */
+    if (element.scrollTop !== before)
+      pinPendingRef.current = true;
+  }
+
+  /*
+   * 有新日志时贴住底部；用户往上翻看历史后自动停跟，点「最新」恢复。
+   *
+   * 用 layout effect（而不是 effect）：日志是「先长高、再贴底」，
+   * 放到绘制之后贴，批量执行时每一批新日志都会先被画在错位的位置上，
+   * 看起来就是面板一跳一跳往上滚。
+   */
+  useLayoutEffect(() => {
     if (!active || !follow)
       return;
 
-    const element = viewRef.current;
-
-    if (element)
-      element.scrollTop = element.scrollHeight;
+    pinToLatest();
   }, [records, active, follow, scope, needle]);
 
   function scrollToLatest() {
-    const element = viewRef.current;
-
     setFollow(true);
-
-    if (element)
-      element.scrollTop = element.scrollHeight;
+    pinToLatest();
   }
 
+  /**
+   * 只有「用户自己翻走了」才停跟。
+   *
+   * 贴底会异步补发一次滚动事件（可能晚到几十毫秒），批量执行日志时，
+   * 这些补发事件与新日志长高混在一起；只看 atBottom 会把它们当成「用户往上翻」，
+   * 跟随开关被误关，面板于是停在原地、看起来一路往上滚。
+   * 所以这里先把「程序刚贴过底」那一下认出来忽略掉，剩下的才当作真实操作。
+   */
   function handleScroll(event: UIEvent<HTMLDivElement>) {
     const element = event.currentTarget;
-    const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+    const top = element.scrollTop;
+    const expectedPin = pinPendingRef.current;
 
-    if (atBottom !== follow)
-      setFollow(atBottom);
+    /* 每一次滚动事件都消费掉这个标记：它只对应程序刚贴底的那一下 */
+    pinPendingRef.current = false;
+
+    if (expectedPin && top === pinnedTopRef.current)
+      return;
+
+    const atBottom = element.scrollHeight - top - element.clientHeight < 24;
+
+    /* 已经在底部（用户拖回来，或程序贴底）：恢复跟随 */
+    if (atBottom) {
+      pinnedTopRef.current = top;
+
+      if (!follow)
+        setFollow(true);
+
+      return;
+    }
+
+    if (follow)
+      setFollow(false);
   }
 
   function renderStatement(statement: LogStatement) {
@@ -527,7 +579,16 @@ export function LogConsole({ records, active, onClear, onCopy }: LogConsoleProps
         </button>
       </div>
 
-      <div className={`log-view${wrap ? "" : " is-nowrap"}`} ref={viewRef} onScroll={handleScroll}>
+      <div
+        className={`log-view${wrap ? "" : " is-nowrap"}`}
+        ref={viewRef}
+        onScroll={handleScroll}
+        /* 用户往上滚轮 = 要看历史：立刻停跟，别被随后到达的日志拽回底部 */
+        onWheel={event => {
+          if (event.deltaY < 0 && follow)
+            setFollow(false);
+        }}
+      >
         {batches.length === 0 ? (
           <span className="empty">暂无日志</span>
         ) : entries.length === 0 ? (

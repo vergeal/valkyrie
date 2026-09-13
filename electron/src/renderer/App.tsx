@@ -63,16 +63,17 @@ function ensureGithubDarkTheme() {
     inherit: true,
     rules: [
       { token: "", foreground: "c9d1d9", background: "0d1117" },
+      /* 语法色在 GitHub Dark 的基础上降一档饱和度：色相不变，长时间看不那么扎眼 */
       { token: "comment", foreground: "8b949e", fontStyle: "italic" },
-      { token: "keyword", foreground: "ff7b72" },
-      { token: "string", foreground: "a5d6ff" },
-      { token: "number", foreground: "79c0ff" },
-      { token: "operator", foreground: "ff7b72" },
+      { token: "keyword", foreground: "e1938e" },
+      { token: "string", foreground: "b6d4ed" },
+      { token: "number", foreground: "93bee4" },
+      { token: "operator", foreground: "e1938e" },
       { token: "delimiter", foreground: "c9d1d9" },
       { token: "identifier", foreground: "c9d1d9" },
-      { token: "predefined", foreground: "79c0ff" },
-      { token: "type", foreground: "ffa657" },
-      { token: "variable", foreground: "ffa657" }
+      { token: "predefined", foreground: "93bee4" },
+      { token: "type", foreground: "dda878" },
+      { token: "variable", foreground: "dda878" }
     ],
     colors: {
       "editor.background": "#0d1117",
@@ -414,6 +415,12 @@ export function App() {
   const lastSessionRef = useRef<{ name?: string; type: string }>({ type: "mysql" });
   /* 用 ref 保存当前会话，避免异步回调里拿到已失效的 sessionId */
   const sessionRef = useRef<SessionState | null>(null);
+  /*
+   * 每个连接上次在「对象」页看的位置（表列表 / 脚本列表）。
+   * 多连接并存时「对象」页只有一页，切连接要把它交还给新连接：
+   * 有记忆就回到原来那批对象，没记忆就退回该连接的第一个库。
+   */
+  const objectTargetRef = useRef<Record<string, { view: "tables" | "scripts"; node: SchemaNode | null }>>({});
 
   activeTabRef.current = activeTabId;
   sessionRef.current = session;
@@ -451,18 +458,29 @@ export function App() {
     return onWindowState(state => setMaximized(state.maximized));
   }, []);
 
-  /* 主题：默认浅色（与设计稿一致），不跟随 Windows 深色模式 */
-  useEffect(() => {
+  /**
+   * 主题落到 Monaco 上：深色用 GitHub Dark，浅色保持 Monaco 默认的 vs。
+   *
+   * 编辑器创建时要再调一次：`create()` 会按传入的 theme 重置 Monaco 的全局主题，
+   * 冷启动就是深色时不管这一步，脚本配色和当前行边框都会是浅色主题的，
+   * 非得手动切一次主题才恢复（create 的 theme 选项写死过 "vs"）。
+   */
+  function applyEditorTheme() {
     const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     const resolved = theme === "system" ? (prefersDark ? "dark" : "light") : theme;
 
-    document.documentElement.style.colorScheme = theme === "system" ? "light dark" : theme;
-
-    /* 深色用 GitHub Dark 配色，浅色保持 Monaco 默认的 vs */
     if (resolved === "dark")
       ensureGithubDarkTheme();
 
     monaco.editor.setTheme(resolved === "dark" ? "valkyrie-github-dark" : "vs");
+  }
+
+  /* 主题：默认浅色（与设计稿一致），不跟随 Windows 深色模式 */
+  useEffect(() => {
+    document.documentElement.style.colorScheme = theme === "system" ? "light dark" : theme;
+
+    /* 深色用 GitHub Dark 配色，浅色保持 Monaco 默认的 vs */
+    applyEditorTheme();
     /* 系统原生菜单 / 对话框也跟随应用主题 */
     void setNativeTheme(theme);
   }, [theme]);
@@ -508,10 +526,17 @@ export function App() {
     if (!editorContainer.current || editorRef.current)
       return;
 
+    /* create() 会把 Monaco 的全局主题设成这里传的值，冷启动深色时必须一开始就传对 */
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const resolvedTheme = settings.theme === "system" ? (prefersDark ? "dark" : "light") : settings.theme;
+
+    if (resolvedTheme === "dark")
+      ensureGithubDarkTheme();
+
     const editor = monaco.editor.create(editorContainer.current, {
       value: DEFAULT_SQL,
       language: "sql",
-      theme: "vs",
+      theme: resolvedTheme === "dark" ? "valkyrie-github-dark" : "vs",
       automaticLayout: true,
       /* 创建时就带上选项里的编辑器配置（不能写死：否则启动时要等选项变动才会生效） */
       minimap: { enabled: settings.editorMinimap },
@@ -521,6 +546,16 @@ export function App() {
       lineNumbers: settings.editorLineNumbers ? "on" : "off",
       tabSize: settings.editorTabSize,
       wordWrap: settings.editorWordWrap ? "on" : "off",
+      /*
+       * 空格 / 制表符的点与缩进参考线默认不画（选项里可开）：
+       * Monaco 默认 renderWhitespace 是 "selection"，选中文本时缩进会冒出一排点，
+       * 参考线也是默认开着的 —— 满屏的点和竖线太吵。
+       */
+      renderWhitespace: settings.editorWhitespace ? "all" : "none",
+      guides: {
+        indentation: settings.editorWhitespace,
+        highlightActiveIndentation: settings.editorWhitespace
+      },
       lineNumbersMinChars: 3,
       scrollBeyondLastLine: false,
       /* 滚动条收细，和界面其它区域保持一致 */
@@ -632,6 +667,11 @@ export function App() {
       wordWrap: settings.editorWordWrap ? "on" : "off",
       lineNumbers: settings.editorLineNumbers ? "on" : "off",
       tabSize: settings.editorTabSize,
+      renderWhitespace: settings.editorWhitespace ? "all" : "none",
+      guides: {
+        indentation: settings.editorWhitespace,
+        highlightActiveIndentation: settings.editorWhitespace
+      },
       minimap: { enabled: settings.editorMinimap },
       quickSuggestions: settings.suggestEnabled ? { other: true, comments: false, strings: false } : false,
       suggestOnTriggerCharacters: settings.suggestEnabled
@@ -639,7 +679,7 @@ export function App() {
     editor.layout();
   }, [
     settings.editorFontSize, settings.editorFontFamily, settings.editorWordWrap, settings.suggestEnabled,
-    settings.editorLineNumbers, settings.editorTabSize, settings.editorMinimap
+    settings.editorLineNumbers, settings.editorTabSize, settings.editorMinimap, settings.editorWhitespace
   ]);
 
   /* 编辑器内容与当前标签同步 */
@@ -879,7 +919,13 @@ export function App() {
     }
   }
 
-  async function openConnection(connection: SavedConnection) {
+  /**
+   * 建立 / 切换连接。
+   *
+   * `focusPage` 为 false 时不把「对象」页牵过去：
+   * 「打开所有连接」要连着开好几条，页面来回跳没有意义，等最后定了活动连接再说。
+   */
+  async function openConnection(connection: SavedConnection, options: { focusPage?: boolean } = {}) {
     setError(null);
     setStatus(`正在连接 ${connection.name} …`);
 
@@ -891,25 +937,32 @@ export function App() {
       lastSessionRef.current = { name: connection.name, type: connection.type ?? lastSessionRef.current.type };
       setStatus(`已切换到 ${connection.name}`);
 
+      let nodes = rootsByConnection[connection.name];
+
       /* 该连接的根节点如果还没拉过（例如刚被别的窗口清掉），补一次 */
-      if (!rootsByConnection[connection.name]) {
+      if (!nodes) {
         try {
           const payload = await invoke<OpenConnectionPayload>("connection.open", { name: connection.name });
+          const fetched = payload.nodes;
 
+          nodes = fetched;
           setOpenSessions(previous => ({
             ...previous,
             [connection.name]: { sessionId: payload.sessionId, name: connection.name, product: payload.product }
           }));
-          setRootsByConnection(previous => ({ ...previous, [connection.name]: payload.nodes }));
-          setRoots(payload.nodes);
+          setRootsByConnection(previous => ({ ...previous, [connection.name]: fetched }));
         } catch (e) {
           setError(messageOf(e));
         }
-      } else {
-        setRoots(rootsByConnection[connection.name]);
       }
 
+      setRoots(nodes ?? []);
       setExpanded(previous => new Set(previous).add(`conn:${connection.name}`));
+
+      /* 切过去了，「对象」页也得跟着换成这条连接的内容 */
+      if (options.focusPage !== false)
+        void focusObjectPage(connection.name, { session: opened, roots: nodes ?? [] });
+
       return true;
     }
 
@@ -935,6 +988,11 @@ export function App() {
 
       /* 只展开连接节点本身，数据库/表等子节点保持收起，由用户按需展开 */
       setExpanded(previous => new Set(previous).add(`conn:${connection.name}`));
+
+      /* 刚连上的连接成为活动连接：「对象」页换成它的内容，别留着上一个连接的 */
+      if (options.focusPage !== false)
+        void focusObjectPage(connection.name, { session: next, roots: payload.nodes });
+
       return true;
     } catch (e) {
       setError(messageOf(e));
@@ -1337,7 +1395,7 @@ export function App() {
   /**
    * 对象树里选中节点 → 记住当前节点，并让「对象」列跟着走：
    * 库 / 表 → 数据表列表（选中哪个表就高亮哪个），脚本 → 脚本列表；
-   * 连接与根节点不联动，免得点一下就把工作区跳走。
+   * 连接节点会换掉「对象」页的归属（内容是那个连接的对象），但不抢当前工作标签。
    */
   function selectTreeNode(node: SchemaNode) {
     setActiveNode(node);
@@ -1354,11 +1412,17 @@ export function App() {
       setTableNodes([]);
     }
 
+    /* 点的是连接本身：活动连接换了，「对象」页也得换成这条连接的内容 */
+    if (node.kind === "CONNECTION" && owned) {
+      void focusObjectPage(node.label, { session: owned, roots: rootsByConnection[node.label] ?? [] });
+      return;
+    }
+
     if (!owned && !session)
       return;
 
     if (node.kind === "QUERY") {
-      void showScriptList({ highlightName: node.path ? node.label : undefined });
+      void showScriptList({ source: node, highlightName: node.path ? node.label : undefined });
       return;
     }
 
@@ -1366,7 +1430,10 @@ export function App() {
       void showTableList(node, { quiet: true });
   }
 
-  /** 当前连接共用的「对象」列（不存在时返回 null） */
+  /**
+   * 常驻的「对象」列（不存在时返回 null）。
+   * 整页只有一页，`connection` 记录它眼下属于哪个连接。
+   */
   function findObjectTab(): ObjectTab | null {
     return tabs.find((tab): tab is ObjectTab => tab.kind === "objects") ?? null;
   }
@@ -1377,10 +1444,15 @@ export function App() {
    * - 选中表 → 显示它所在的容器，并把该表高亮；
    * - 选中库 / 模式 / 表容器 → 显示它们下面的表容器；
    * - 页面已存在就地换内容（不会再开第二个「对象」标签），并且固定在最左侧；
-   * - `force` 为 false（树选中联动）时优先用已有内容，不重新读库。
+   * - `force` 为 false（树选中联动）时优先用已有内容，不重新读库，但只在这个连接
+   *   自己身上复用：不同连接出现同名库 / 模式时，拿过来复用就会把别的连接的表留在页面上；
+   * - `session` 显式传入当前生效的会话（切连接 / 刚连上时组件状态还没落地，按名字查不到）。
    */
-  async function showTableList(source: SchemaNode, options: { force?: boolean; quiet?: boolean } = {}) {
-    const owner = sessionOfNode(source);
+  async function showTableList(
+    source: SchemaNode,
+    options: { force?: boolean; quiet?: boolean; activate?: boolean; session?: SessionState | null } = {}
+  ) {
+    const owner = options.session ?? sessionOfNode(source);
 
     if (!owner) {
       if (!options.quiet)
@@ -1389,12 +1461,27 @@ export function App() {
       return;
     }
 
+    /*
+     * 连接 / 根节点自己没有表：退到这条连接的第一个库（和查询页默认选库同一个口径）。
+     * 这两个节点是界面自造的 id（conn:xx / conn-root），直接拿去问数据层就是「节点不存在」。
+     */
+    const start = source.kind === "CONNECTION"
+      ? (rootsByConnection[source.label] ?? [])[0]
+      : source.kind === "ROOT" ? roots[0] : source;
+
+    if (!start) {
+      if (!options.quiet)
+        setError("请先在左侧选择一个连接");
+
+      return;
+    }
+
     /* 选中的是表 → 展示它所在的容器，并把这个表标为当前项 */
-    let target = source;
-    const highlight = source.kind === "TABLE" && !source.hasChildren ? source.label : null;
+    let target = start;
+    const highlight = start.kind === "TABLE" && !start.hasChildren ? start.label : null;
 
     if (highlight) {
-      const parent = parentTreeNode(source.id);
+      const parent = parentTreeNode(start.id);
 
       if (parent)
         target = parent;
@@ -1418,18 +1505,24 @@ export function App() {
     }
 
     const existing = findObjectTab();
-    const sameContainer = existing?.view === "tables" && existing.node
+    const sameContainer = existing?.connection === owner.name
+      && existing.view === "tables" && existing.node
       && existing.node.catalog === container.catalog
       && existing.node.schema === container.schema;
 
     /* 已经在看同一批表：只切过去 / 改高亮，不重新读库 */
     if (existing && sameContainer && !options.force) {
-      setActiveTabId(existing.id);
+      /* 切连接时换内容但不抢当前的工作标签 */
+      if (options.activate !== false)
+        setActiveTabId(existing.id);
+
       setTableSelection(highlight ? [highlight] : []);
       return;
     }
 
     const tables = await loadTableNodes(container, options.force ?? false, owner.sessionId);
+
+    objectTargetRef.current[owner.name] = { view: "tables", node: container };
 
     /* 切换库 / 模式时也让列表"空一下再出现"，和刷新一个观感 */
     setListFlash(previous => previous + 1);
@@ -1455,7 +1548,10 @@ export function App() {
           ...previous.filter(tab => tab.id !== existing.id)
         ];
       });
-      setActiveTabId(existing.id);
+
+      if (options.activate !== false)
+        setActiveTabId(existing.id);
+
       setTableFilter("");
       setTableSelection(highlight ? [highlight] : []);
       return;
@@ -1476,7 +1572,10 @@ export function App() {
     };
 
     setTabs(previous => [tab, ...previous]);
-    setActiveTabId(tab.id);
+
+    if (options.activate !== false)
+      setActiveTabId(tab.id);
+
     setTableFilter("");
     setTableSelection(highlight ? [highlight] : []);
   }
@@ -1484,6 +1583,46 @@ export function App() {
   /** 显式打开表列表（工具栏 / 右键 / 菜单）：重新读一遍表 */
   async function openTableList(source: SchemaNode) {
     await showTableList(source, { force: true });
+  }
+
+  /**
+   * 活动连接换成另一条连接后，把常驻的「对象」页也交给它：
+   * 有记过的位置就回到那儿，没有就退回这条连接的第一个库（和查询页默认选库同一个口径）——
+   * 总之页面上不能继续留着上一个连接的表 / 脚本。
+   *
+   * 切连接只是换「对象」页的内容，不抢当前工作标签（activate 恒为 false）。
+   */
+  async function focusObjectPage(
+    name: string,
+    context: { session?: SessionState | null; roots?: SchemaNode[] | null } = {}
+  ) {
+    const page = findObjectTab();
+
+    if (!page || page.connection === name)
+      return;
+
+    /* 刚连上 / 刚切换时组件状态还没落地，会话与根节点以调用方手里的那份为准 */
+    const owner = context.session ?? openSessions[name];
+
+    if (!owner)
+      return;
+
+    const remembered = objectTargetRef.current[name];
+
+    if (remembered?.view === "scripts") {
+      await showScriptList({ session: owner, activate: false });
+      return;
+    }
+
+    const node = remembered?.node ?? (context.roots ?? rootsByConnection[name] ?? [])[0];
+
+    if (node) {
+      await showTableList(node, { quiet: true, session: owner, activate: false });
+      return;
+    }
+
+    /* 这条连接还没拿到根节点：宁可把页收掉，也不要留着别的连接的内容 */
+    setTabs(previous => previous.filter(tab => tab.id !== page.id));
   }
 
   async function loadTableNodes(container: SchemaNode, force = true, sessionId?: string): Promise<SchemaNode[]> {
@@ -1526,15 +1665,27 @@ export function App() {
    * 没开对象页时只重读树节点，不给不存在的列表闪。
    */
   async function refreshObjectList(node: SchemaNode) {
+    /* 连接节点上的「刷新对象」＝重新读它的库 / 模式列表 */
+    if (node.kind === "CONNECTION") {
+      await refreshConnectionRoots(node.label);
+      return;
+    }
+
     const active = sessionOfNode(node);
 
     if (!active)
       return;
 
+    const page = tabs.find((tab): tab is ObjectTab => tab.kind === "objects");
+
+    /* 对象页眼下属于别的连接：先把它交给这个节点所属的连接，免得按别的连接去读表 */
+    if (page && page.connection !== active.name) {
+      await showTableList(node, { force: true, quiet: true, session: active, activate: false });
+      return;
+    }
+
     try {
       const candidates = await containerCandidates(active.sessionId, node);
-      /* 对象列只要是打开的（哪怕是脚本视图）都接受刷新，refreshTableList 会把它切回表列表 */
-      const page = tabs.find((tab): tab is ObjectTab => tab.kind === "objects");
 
       if (page) {
         /*
@@ -1869,10 +2020,8 @@ export function App() {
     await deleteScriptFiles([{ name: node.label, catalog: node.catalog ?? "default" }]);
   }
 
-  /* 拉取当前连接下所有数据库目录里的脚本（脚本对象页数据源） */
-  async function loadScriptFiles(): Promise<ScriptFile[]> {
-    const active = sessionRef.current;
-
+  /* 拉取某个连接下所有数据库目录里的脚本（脚本对象页数据源） */
+  async function loadScriptFiles(active: SessionState | null): Promise<ScriptFile[]> {
     if (!active)
       return [];
 
@@ -1885,36 +2034,47 @@ export function App() {
    * 列出所有数据库目录下的 .sql，双击打开、右键重命名 / 删除 / 在文件夹中显示。
    */
   /**
-   * 让「对象」列显示脚本列表（当前连接下所有库的 .sql）。
+   * 让「对象」列显示脚本列表（某个连接下所有库的 .sql）。
    * 与表列表共用同一个「对象」标签，只是切换内容；选中脚本节点时会定位到那一行。
+   * 页面属于哪个连接由 `source`（树上的脚本节点）/ `session` 决定，不跟着活动会话瞎猜。
    */
-  async function showScriptList(options: { force?: boolean; highlightName?: string } = {}) {
-    if (!session) {
+  async function showScriptList(
+    options: { force?: boolean; highlightName?: string; source?: SchemaNode; session?: SessionState | null; activate?: boolean } = {}
+  ) {
+    const owner = options.session ?? (options.source ? sessionOfNode(options.source) : sessionRef.current);
+
+    if (!owner) {
       setError("请先在左侧选择一个连接");
       return;
     }
 
     const existing = findObjectTab();
 
-    /* 已经在看脚本列表：只切过去 / 定位，不重新扫目录 */
-    if (existing?.view === "scripts" && !options.force) {
-      setActiveTabId(existing.id);
+    /* 已经在看这个连接的脚本列表：只切过去 / 定位，不重新扫目录 */
+    if (existing?.connection === owner.name && existing.view === "scripts" && !options.force) {
+      if (options.activate !== false)
+        setActiveTabId(existing.id);
+
       highlightScript(existing, options.highlightName);
       return;
     }
 
-    const scripts = await loadScriptFiles().catch(error => {
+    const scripts = await loadScriptFiles(owner).catch(error => {
       setError(messageOf(error));
       return [] as ScriptFile[];
     });
 
+    objectTargetRef.current[owner.name] = { view: "scripts", node: null };
     setScriptFlash(previous => previous + 1);
 
     if (existing) {
       setTabs(previous => previous.map(tab => tab.id === existing.id
-        ? { ...tab, view: "scripts", scripts, loading: false, title: OBJECT_TAB_TITLE } as WorkTab
+        ? { ...tab, view: "scripts", connection: owner.name, scripts, loading: false, title: OBJECT_TAB_TITLE } as WorkTab
         : tab));
-      setActiveTabId(existing.id);
+
+      if (options.activate !== false)
+        setActiveTabId(existing.id);
+
       setScriptFilter("");
       highlightScript({ scripts }, options.highlightName);
       return;
@@ -1924,7 +2084,7 @@ export function App() {
       id: `tab-${tabSequence++}`,
       kind: "objects",
       view: "scripts",
-      connection: session.name,
+      connection: owner.name,
       title: OBJECT_TAB_TITLE,
       running: false,
       messages: [],
@@ -1936,7 +2096,10 @@ export function App() {
 
     /* 「对象」列固定在标签栏最左侧 */
     setTabs(previous => [tab, ...previous]);
-    setActiveTabId(tab.id);
+
+    if (options.activate !== false)
+      setActiveTabId(tab.id);
+
     setScriptFilter("");
     highlightScript({ scripts }, options.highlightName);
   }
@@ -1954,10 +2117,18 @@ export function App() {
   }
 
   async function refreshScriptList(tabId: string) {
+    /* 页面自己记着属于哪个连接：刷新要按它的连接走，不能跟着当前活动连接 */
+    const owner = sessionByName(connectionOfTab(tabs.find(tab => tab.id === tabId)));
+
+    if (!owner) {
+      setError("请先在左侧选择一个连接");
+      return;
+    }
+
     updateTab(tabId, { loading: true, view: "scripts" });
 
     try {
-      const scripts = await loadScriptFiles();
+      const scripts = await loadScriptFiles(owner);
 
       updateTab(tabId, { view: "scripts", scripts, loading: false, title: OBJECT_TAB_TITLE });
       setScriptFlash(previous => previous + 1);
@@ -1969,17 +2140,16 @@ export function App() {
 
   /* 刷新对象树里所有「查询脚本」容器，让树上的脚本列表跟上文件变化 */
   async function refreshScriptTree() {
-    const active = sessionRef.current;
-
-    if (!active)
-      return;
-
     const containers = Object.values(treeChildren)
       .flat()
       .filter(node => node.kind === "QUERY" && !node.path);
 
-    await Promise.all(containers.map(node =>
-      loadChildren(active.sessionId, node, true).catch(() => [])));
+    /* 每个容器用自己所属连接的会话重读：多连接并存时按活动连接读会全部落空 */
+    await Promise.all(containers.map(node => {
+      const owner = sessionOfNode(node);
+
+      return owner ? loadChildren(owner.sessionId, node, true).catch(() => []) : Promise.resolve([]);
+    }));
   }
 
   async function saveActiveScript(saveAs = false) {
@@ -2160,8 +2330,11 @@ export function App() {
    * 关闭某个连接（不传就是当前活动的那个）。
    * 多连接并存：只清掉这个连接的会话、根节点与它的数据页 / 设计页 / 对象页，
    * 其它连接完全不受影响；查询控制台保留（SQL 文本不丢），只清执行结果。
+   *
+   * `confirmed` 为 true 表示调用方已经把未保存内容统一确认过了（「关闭所有连接」），
+   * 不再逐条弹窗。
    */
-  async function disconnect(name?: string) {
+  async function disconnect(name?: string, options: { confirmed?: boolean } = {}) {
     const target = name ?? session?.name;
 
     if (!target)
@@ -2174,7 +2347,7 @@ export function App() {
       || (tab.kind === "query" && tab.path.connection === target));
     const unsaved = closingTabs.filter(hasUnsaved);
 
-    if (unsaved.length > 0) {
+    if (!options.confirmed && unsaved.length > 0) {
       const confirmed = await askConfirm(
         `连接 ${target} 上还有没保存的内容：\n${unsaved.map(describeUnsaved).join("\n")}\n\n关闭连接后这些改动会丢失，确定关闭吗？`,
         "未保存的修改",
@@ -2200,6 +2373,8 @@ export function App() {
       delete next[target];
       return next;
     });
+    /* 记下的对象位置属于这次会话的节点，重连后 id 全变了，留着只会指到别处 */
+    delete objectTargetRef.current[target];
 
     /* 关掉这个连接的数据页 / 设计页 / 对象页；查询控制台只清结果，保留 SQL */
     const remaining = tabs
@@ -2239,12 +2414,150 @@ export function App() {
     setStatus(`已关闭连接 ${target}`);
   }
 
-  /* 重新拉取某个节点的下一级对象 */
-  async function refreshNode(node: SchemaNode) {
-    const active = sessionRef.current;
+  /**
+   * 打开所有还没打开的连接（「我的连接 → 打开所有连接」）。
+   *
+   * 一条一条顺序连：每次只开一个新会话，某条连不上不影响后面；
+   * 全部开完把活动连接还给原来那条，免得点一下就把工作区和「对象」页甩到最后打开的那条上。
+   */
+  async function openAllConnections() {
+    const pending = connections.filter(item => !openSessions[item.name]);
 
-    if (!active)
+    if (pending.length === 0) {
+      setStatus("所有连接都已打开");
+      flash("所有连接都已打开");
       return;
+    }
+
+    const keep = session;
+    const openedNames: string[] = [];
+    const failed: string[] = [];
+
+    for (const connection of pending) {
+      setStatus(`正在打开 ${connection.name} …（${openedNames.length + failed.length + 1}/${pending.length}）`);
+
+      if (await openConnection(connection, { focusPage: false }))
+        openedNames.push(connection.name);
+      else
+        failed.push(connection.name);
+    }
+
+    /* 活动连接还给原来那条；原来根本没连过，就落到第一条打开的连接上 */
+    const back = keep && openSessions[keep.name] ? keep.name : openedNames[0];
+    const connection = back ? connections.find(item => item.name === back) : undefined;
+
+    if (connection)
+      await openConnection(connection, { focusPage: !keep });
+
+    if (failed.length > 0)
+      setError(`以下连接打开失败：${failed.join("、")}`);
+
+    setStatus(`已打开 ${openedNames.length} 个连接${failed.length > 0 ? `，失败 ${failed.length} 个` : ""}`);
+  }
+
+  /**
+   * 关闭所有已打开的连接（「我的连接 → 关闭所有连接」）。
+   *
+   * 未保存的内容只统一确认一次（有几条连接就弹几次太折腾）。
+   * 关完必须自己收尾：disconnect 里挑「下一个活动连接」用的是调用开始时的会话快照，
+   * 循环里最后可能把活动会话指到已经关掉的连接上。
+   */
+  async function closeAllConnections() {
+    const names = Object.keys(openSessions);
+
+    if (names.length === 0) {
+      setStatus("当前没有已打开的连接");
+      flash("当前没有已打开的连接");
+      return;
+    }
+
+    const unsaved = tabs.filter(tab => hasUnsaved(tab) && names.includes(connectionOfTab(tab) ?? ""));
+
+    if (unsaved.length > 0) {
+      const confirmed = await askConfirm(
+        `以下标签还有没保存的内容：\n${unsaved.map(describeUnsaved).join("\n")}\n\n关闭所有连接后这些改动会丢失，确定关闭吗？`,
+        "未保存的修改",
+        true
+      );
+
+      if (!confirmed)
+        return;
+    }
+
+    setStatus(`正在关闭 ${names.length} 个连接 …`);
+
+    for (const name of names)
+      await disconnect(name, { confirmed: true });
+
+    setSession(null);
+    setRoots([]);
+    setCatalogOptions([]);
+    setSchemaOptions([]);
+    setTableNodes([]);
+    setActiveNode(null);
+    setTreeFilter("");
+    setError(null);
+    setStatus(`已关闭 ${names.length} 个连接`);
+  }
+
+  /**
+   * 刷新连接节点：重读这条连接的顶层库 / 模式列表（不重连，已打开的页不受影响）。
+   *
+   * 顶层节点只从 connection.open 里来过，树上那个 `conn:连接名` 是界面自己编的 id，
+   * 拿它去问数据层就是「节点不存在」—— 所以这里走 schema.roots，并带上该连接的会话。
+   */
+  async function refreshConnectionRoots(name: string) {
+    const owner = openSessions[name];
+
+    if (!owner) {
+      /* 还没连上：刷新等于连一次 */
+      const connection = connections.find(item => item.name === name);
+
+      if (connection)
+        await openConnection(connection);
+
+      return;
+    }
+
+    setPending("refreshNode");
+
+    try {
+      const payload = await invoke<{ nodes: SchemaNode[] }>("schema.roots", { sessionId: owner.sessionId });
+
+      setRootsByConnection(previous => ({ ...previous, [name]: payload.nodes }));
+
+      if (session?.name === name) {
+        setRoots(payload.nodes);
+        setCatalogOptions(payload.nodes);
+      }
+
+      setStatus(`已刷新 ${name}`);
+      flash(`已刷新 ${name}`);
+    } catch (e) {
+      setError(messageOf(e));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  /** 重新拉取某个节点的下一级对象（按节点自己的连接取会话，不能拿当前活动会话去套） */
+  async function refreshNode(node: SchemaNode) {
+    if (node.kind === "CONNECTION") {
+      await refreshConnectionRoots(node.label);
+      return;
+    }
+
+    if (node.kind === "ROOT") {
+      await refreshConnections();
+      return;
+    }
+
+    const active = sessionOfNode(node);
+
+    if (!active) {
+      setError("请先在左侧选择一个连接");
+      return;
+    }
 
     try {
       await withBusy(() => loadChildren(active.sessionId, node, true));
@@ -2354,8 +2667,22 @@ export function App() {
     const open = expanded.has(node.id);
 
     if (node.kind === "ROOT") {
+      const openCount = Object.keys(openSessions).length;
+
       return [
         { label: "新建查询", action: createQueryTab },
+        { separator: true },
+        {
+          label: "打开所有连接",
+          disabled: connections.length === 0 || openCount >= connections.length,
+          action: () => void openAllConnections()
+        },
+        {
+          label: "关闭所有连接",
+          disabled: openCount === 0,
+          action: () => void closeAllConnections()
+        },
+        { separator: true },
         { label: "刷新连接", action: () => void refreshConnections() }
       ];
     }

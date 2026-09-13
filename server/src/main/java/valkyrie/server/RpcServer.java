@@ -143,6 +143,7 @@ public class RpcServer
                         case "connection.open" -> openConnection(params);
                         case "connection.close" -> closeConnection(params);
                         case "schema.children" -> schemaChildren(params);
+                        case "schema.roots" -> schemaRoots(params);
                         case "table.page" -> tablePage(params);
                         case "table.columns" -> tableColumns(params);
                         case "table.indexes" -> tableIndexes(params);
@@ -376,6 +377,25 @@ public class RpcServer
                         for (DBNode child : children)
                                 nodes.add(nodeJson(session, child));
                 }
+
+                JSONObject ret = new JSONObject();
+                ret.put("nodes", nodes);
+                return ret;
+        }
+
+        /**
+         * 重新读取会话的顶层对象层级（连接节点上的「刷新」）。
+         *
+         * 不重开会话、不重连，只是让驱动再报一次当前的库 / 模式列表：
+         * 重连要关掉数据源，已打开的数据页、脚本快照都会跟着作废。
+         */
+        private Object schemaRoots(JSONObject params)
+        {
+                OpenConnection session = require(params.getString("sessionId"));
+                JSONArray nodes = new JSONArray();
+
+                for (DBNode node : session.driver.getNodeHierarchy())
+                        nodes.add(nodeJson(session, node));
 
                 JSONObject ret = new JSONObject();
                 ret.put("nodes", nodes);
@@ -637,7 +657,11 @@ public class RpcServer
 
         private JSONObject nodeJson(OpenConnection session, DBNode node)
         {
-                String id = "n" + session.nodeSequence.incrementAndGet();
+                /*
+                 * 节点 id 带上会话前缀：界面把节点 id 当全局键用（树缓存 / 展开状态 / 父节点回溯），
+                 * 多连接并存时每个会话各自从 n1 开始编号会互相撞车，进而串到别的连接上。
+                 */
+                String id = session.id + ":n" + session.nodeSequence.incrementAndGet();
                 session.nodes.put(id, node);
 
                 JSONObject json = new JSONObject();

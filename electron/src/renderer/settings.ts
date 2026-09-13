@@ -19,6 +19,8 @@ export interface AppSettings {
   editorLineNumbers: boolean;
   /** 编辑器缩进宽度 */
   editorTabSize: number;
+  /** 显示空格 / 制表符与缩进参考线（默认关闭：满屏的点和竖线很吵） */
+  editorWhitespace: boolean;
   /** 编辑器显示缩略图 */
   editorMinimap: boolean;
   /** 结果表格字号（px） */
@@ -46,6 +48,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   suggestEnabled: true,
   editorLineNumbers: true,
   editorTabSize: 4,
+  editorWhitespace: false,
   editorMinimap: false,
   gridFontSize: 14,
   gridZebra: true,
