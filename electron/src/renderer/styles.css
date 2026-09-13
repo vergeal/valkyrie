@@ -762,9 +762,36 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
  * 多行编辑气泡：单元格里放不下多行文本，编辑时贴在单元格上方或下方浮出，
  * 里面是可换行的 textarea（Enter 换行，⌘/Ctrl+Enter 保存）。位置由 ResultGrid 实测给。
  */
-.cell-bubble {
+/* 锚点：尺寸由里面的卡片撑开，三角箭头绝对定位在贴向单元格的那条边上 */
+.cell-bubble-anchor {
   position: fixed;
   z-index: 40;
+}
+
+.cell-bubble-arrow {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--overlay);
+  border: 1px solid var(--line);
+  transform: rotate(45deg);
+}
+
+/* 气泡在单元格下方 → 箭头长在上边缘，指向上方 */
+.cell-bubble-anchor.is-below .cell-bubble-arrow {
+  top: -6px;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+/* 气泡在单元格上方 → 箭头长在下边缘，指向下方 */
+.cell-bubble-anchor.is-above .cell-bubble-arrow {
+  bottom: -6px;
+  border-left: 0;
+  border-top: 0;
+}
+
+.cell-bubble {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -773,6 +800,13 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: 0 16px 40px light-dark(rgba(15, 23, 42, .18), rgba(1, 4, 9, .65));
+  /* 用户可以自由缩放：右下角拖拽（缩放需要 overflow 不是 visible） */
+  resize: both;
+  overflow: hidden;
+  min-width: 280px;
+  min-height: 156px;
+  max-width: 90vw;
+  max-height: 80vh;
 }
 
 .cell-bubble-head {
@@ -794,9 +828,9 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
 .cell-bubble-hint { flex: 0 0 auto; }
 
 .cell-bubble-input {
+  flex: 1;
   width: 100%;
-  min-height: 96px;
-  max-height: 40vh;
+  min-height: 0;
   padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -805,7 +839,8 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
   font-family: var(--mono);
   font-size: var(--grid-font-size, 14px);
   line-height: 1.45;
-  resize: vertical;
+  /* 缩放交给外层气泡，输入框跟着一起变大 */
+  resize: none;
   outline: none;
 }
 
