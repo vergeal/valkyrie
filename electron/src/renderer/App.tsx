@@ -2373,6 +2373,96 @@ export function App() {
    * 保存表设计页的改动：字段新增 / 修改 / 改名的差异交给数据层算（见 RPC table.design），
    * 这里只负责二次确认、下发、重新读结构与刷新对象列表。
    */
+  /** 把「这次保存会改什么」列成清单：删除类改动要单独点名（确认框里必须说清楚） */
+  function describeDesignChanges(
+    tab: DesignTab | undefined, columns: DesignColumn[], indexes: DesignIndex[]
+  ): string[] {
+    const lines: string[] = [];
+    const existingColumns = new Map((tab?.columns ?? []).map(column => [column.name, column]));
+    const keptColumns = new Set<string>();
+
+    for (const column of columns) {
+      const before = existingColumns.get(column.originalName ?? column.name);
+
+      if (!before) {
+        lines.push(`· 新增字段 ${column.name}${column.type ? ` ${column.type}` : ""}`);
+        continue;
+      }
+
+      keptColumns.add(before.name);
+
+      const changes: string[] = [];
+
+      if (before.name !== column.name)
+        changes.push(`改名为 ${column.name}`);
+
+      if ((before.type ?? "") !== column.type)
+        changes.push(`类型 ${before.type ?? "（空）"} → ${column.type || "（空）"}`);
+
+      if (Boolean(before.notNull) !== column.notNull)
+        changes.push(column.notNull ? "改为非空" : "改为可空");
+
+      if (Boolean(before.autoIncrement) !== column.autoIncrement)
+        changes.push(column.autoIncrement ? "加上自增" : "去掉自增");
+
+      if ((before.defaultValue ?? "") !== (column.defaultValue ?? ""))
+        changes.push(`默认值 → ${column.defaultValue || "NULL"}`);
+
+      if ((before.comment ?? "") !== (column.comment ?? ""))
+        changes.push(`注释 → ${column.comment || "（清空）"}`);
+
+      if (changes.length > 0)
+        lines.push(`· 修改字段 ${before.name}：${changes.join("，")}`);
+    }
+
+    for (const column of tab?.columns ?? [])
+      if (!keptColumns.has(column.name))
+        lines.push(`· 删除字段 ${column.name}（字段里的数据会一起丢失）`);
+
+    const primaryBefore = (tab?.columns ?? []).filter(column => column.primary).map(column => column.name);
+    const primaryAfter = columns.filter(column => column.primary).map(column => column.name);
+
+    if (primaryBefore.join(",") !== primaryAfter.join(","))
+      lines.push(`· 主键：${primaryBefore.join("+") || "（无）"} → ${primaryAfter.join("+") || "（无）"}`);
+
+    const existingIndexes = new Map((tab?.indexes ?? []).map(index => [index.name, index]));
+    const keptIndexes = new Set<string>();
+
+    for (const index of indexes) {
+      const before = existingIndexes.get(index.originalName ?? index.name);
+
+      if (!before) {
+        lines.push(`· 新增索引 ${index.name}（${index.columnsText || ""}）`);
+        continue;
+      }
+
+      keptIndexes.add(before.name);
+
+      const changes: string[] = [];
+
+      if (before.name !== index.name)
+        changes.push(`改名为 ${index.name}`);
+
+      if ((before.columnsText ?? "") !== (index.columnsText ?? ""))
+        changes.push(`字段 ${before.columnsText ?? ""} → ${index.columnsText ?? ""}`);
+
+      if ((before.type ?? "") !== (index.type ?? ""))
+        changes.push(`类型 ${before.type ?? ""} → ${index.type ?? ""}`);
+
+      if (Boolean(before.visible) !== index.visible)
+        changes.push(index.visible ? "改为可见" : "改为不可见");
+
+      if (changes.length > 0)
+        lines.push(`· 修改索引 ${before.name}：${changes.join("，")}`);
+    }
+
+    for (const index of tab?.indexes ?? [])
+      if (!keptIndexes.has(index.name))
+        lines.push(`· 删除索引 ${index.name}`);
+
+    return lines;
+  }
+
   async function saveTableDesign(
     tabId: string, node: SchemaNode, columns: DesignColumn[], indexes: DesignIndex[]
   ) {
@@ -2382,8 +2472,11 @@ export function App() {
     if (!target)
       return;
 
+    const changes = describeDesignChanges(tab?.kind === "design" ? tab : undefined, columns, indexes);
     const confirmed = await askConfirm(
-      `确定保存对表 ${node.label} 的结构修改？会直接改动数据库对象，无法撤销。`,
+      `将要对表 ${node.label} 执行以下结构修改：\n\n`
+      + `${changes.length > 0 ? changes.join("\n") : "（没有检测到结构变化）"}\n\n`
+      + "这些改动会直接写进数据库，无法撤销，确定执行吗？",
       "保存表设计",
       true
     );
@@ -4519,6 +4612,13 @@ export function App() {
                   ddl={activeTab.ddl}
                   loading={activeTab.loading}
                   onSave={(columns, indexes) => void saveTableDesign(activeTab.id, activeTab.node, columns, indexes)}
+                  onConfirmRemove={(names, kind) => askConfirm(
+                    `确定从设计里删掉${kind} ${names.join("、")}？\n\n`
+                    + `这一步只是改设计稿（点「刷新」可还原）；`
+                    + `点「保存」后才会真正从数据库里删掉${kind === "字段" ? "，字段里的数据会一起丢失" : "，索引会一起丢失"}。`,
+                    `删除${kind}`,
+                    true
+                  )}
                   onReload={() => void loadDesign(activeTab.id, activeTab.node)}
                   onApply={ddl => void applyTableDdl(activeTab.id, activeTab.node, ddl)}
                 />

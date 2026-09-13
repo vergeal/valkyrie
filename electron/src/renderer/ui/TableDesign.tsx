@@ -30,6 +30,8 @@ interface TableDesignProps {
   loading: boolean;
   /** 保存结构改动（外层负责二次确认、下发与重新读取结构） */
   onSave?: (columns: DesignColumn[], indexes: DesignIndex[]) => void;
+  /** 删除已有的字段 / 索引行前问一句（外层弹确认框；新增行不用问） */
+  onConfirmRemove?: (names: string[], kind: "字段" | "索引") => Promise<boolean>;
   /** 重新读一次结构与 DDL */
   onReload?: () => void;
   /** 直接执行编辑后的 DDL（外层负责确认） */
@@ -75,7 +77,7 @@ function toPayload<T extends { key: string }>(row: T): Omit<T, "key"> {
   return rest;
 }
 
-export function TableDesign({ table, columns, indexes, ddl, loading, onSave, onReload, onApply }: TableDesignProps) {
+export function TableDesign({ table, columns, indexes, ddl, loading, onSave, onConfirmRemove, onReload, onApply }: TableDesignProps) {
   const [active, setActive] = useState<DesignTab>("columns");
   const [columnRows, setColumnRows] = useState<ColumnRow[]>([]);
   const [indexRows, setIndexRows] = useState<IndexRow[]>([]);
@@ -149,14 +151,35 @@ export function TableDesign({ table, columns, indexes, ddl, loading, onSave, onR
     setActive("indexes");
   }
 
-  function removePicked() {
+  async function removePicked() {
     if (active === "columns") {
+      const picked = columnRows.filter(row => pickedColumns.includes(row.key));
+      /* 已经在库里的字段：删掉这行意味着保存后 DROP COLUMN，必须先问一句 */
+      const existing = picked.filter(row => baselineColumns.some(baseline => baseline.key === row.key));
+
+      if (existing.length > 0 && onConfirmRemove) {
+        const confirmed = await onConfirmRemove(existing.map(row => row.name || "（未命名）"), "字段");
+
+        if (!confirmed)
+          return;
+      }
+
       setColumnRows(previous => previous.filter(row => !pickedColumns.includes(row.key)));
       setPickedColumns([]);
       return;
     }
 
     if (active === "indexes") {
+      const picked = indexRows.filter(row => pickedIndexes.includes(row.key));
+      const existing = picked.filter(row => baselineIndexes.some(baseline => baseline.key === row.key));
+
+      if (existing.length > 0 && onConfirmRemove) {
+        const confirmed = await onConfirmRemove(existing.map(row => row.name || "（未命名）"), "索引");
+
+        if (!confirmed)
+          return;
+      }
+
       setIndexRows(previous => previous.filter(row => !pickedIndexes.includes(row.key)));
       setPickedIndexes([]);
     }
