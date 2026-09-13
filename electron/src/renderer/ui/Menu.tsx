@@ -19,6 +19,8 @@ export interface MenuEntry {
    * 原生菜单交给系统画在最右侧；应用内下拉菜单用它派生显示文案。
    */
   accelerator?: string;
+  /** 二级菜单：有 children 时这一项变成可展开的子菜单 */
+  children?: MenuEntry[];
 }
 
 /**
@@ -33,6 +35,30 @@ function renderEntries(
 
   return entries.map((entry, index) => entry.separator
     ? <Separator key={`sep-${index}`} className="ctx-sep" />
+    : entry.children
+      ? (
+        <DropdownMenu.Sub key={`${entry.label}-${index}`}>
+          <DropdownMenu.SubTrigger
+            className={`menu-item${entry.danger ? " is-danger" : ""}`}
+            disabled={entry.disabled}
+          >
+            {entry.icon && <Icon name={entry.icon} size={13} className="menu-item-icon" />}
+            <span className="menu-item-label">{entry.label}</span>
+            <Icon name="chevronRight" size={12} className="menu-item-chevron" />
+          </DropdownMenu.SubTrigger>
+
+          <DropdownMenu.Portal>
+            <DropdownMenu.SubContent
+              className="menu-dropdown menu-submenu"
+              sideOffset={4}
+              alignOffset={-4}
+              collisionPadding={8}
+            >
+              {renderEntries(entry.children, components)}
+            </DropdownMenu.SubContent>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Sub>
+      )
     : (
       <Item
         key={`${entry.label}-${index}`}
@@ -55,27 +81,48 @@ export async function popupNativeMenu(entries: MenuEntry[]) {
   if (entries.length === 0)
     return;
 
-  const items: NativeMenuItem[] = await Promise.all(entries.map(async (entry, index) => {
+  const toNativeItem = async (entry: MenuEntry, id: string): Promise<NativeMenuItem> => {
     if (entry.separator)
       return { type: "separator" as const };
 
     return {
-      id: String(index),
+      id,
       label: entry.label ?? "",
       enabled: !entry.disabled,
       /* 快捷键提示由系统右对齐显示，不注册成全局快捷键 */
       accelerator: entry.accelerator,
       /* 有图标就先栅格化成 PNG，系统菜单才能显示 */
-      icon: entry.icon ? await menuIconDataUrl(entry.icon, entry.iconColor) ?? undefined : undefined
+      icon: entry.icon ? await menuIconDataUrl(entry.icon, entry.iconColor) ?? undefined : undefined,
+      /* 二级菜单：递归转换，id 用 2 / 2.1 这样的路径 */
+      submenu: entry.children
+        ? await Promise.all(entry.children.map((child, childIndex) => toNativeItem(child, `${id}.${childIndex}`)))
+        : undefined
     };
-  }));
+  };
+
+  const items: NativeMenuItem[] = await Promise.all(
+    entries.map((entry, index) => toNativeItem(entry, String(index)))
+  );
 
   const chosen = await showMenu(items);
 
   if (chosen == null)
     return;
 
-  entries[Number(chosen)]?.action?.();
+  /* 按路径找到被点的那一项（二级菜单是 "2.1" 这种 id） */
+  let list = entries;
+  let found: MenuEntry | undefined;
+
+  for (const part of chosen.split(".")) {
+    found = list[Number(part)];
+
+    if (!found)
+      return;
+
+    list = found.children ?? [];
+  }
+
+  found?.action?.();
 }
 
 /** 顶部菜单栏的一项：点击 / 悬停展开 */

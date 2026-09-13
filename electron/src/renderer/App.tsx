@@ -2697,9 +2697,15 @@ export function App() {
       action: () => void deleteSelectedRows()
     },
     { separator: true },
-    { label: "复制为 INSERT", action: () => void copyRows("insert") },
-    { label: "复制为 UPDATE", action: () => void copyRows("update") },
-    { label: "复制为 JSON", action: () => void copyRows("json") },
+    {
+      label: "复制为…",
+      icon: "copy",
+      children: [
+        { label: "INSERT 语句", action: () => void copyRows("insert") },
+        { label: "UPDATE 语句", action: () => void copyRows("update") },
+        { label: "JSON", action: () => void copyRows("json") }
+      ]
+    },
     { separator: true },
     { label: "导出 CSV", action: () => void exportResult("csv") },
     { label: "导出 Excel", action: () => void exportResult("excel") },

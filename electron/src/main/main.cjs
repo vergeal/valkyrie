@@ -190,7 +190,8 @@ function registerIpc() {
       return null;
 
     return new Promise(resolve => {
-      const template = (options?.items || []).map(item => item.type === "separator"
+      /* 渲染层传过来的菜单项（含二级菜单）→ 原生菜单模板 */
+      const toTemplateItem = item => item.type === "separator"
         ? { type: "separator" }
         : {
             id: item.id,
@@ -201,8 +202,12 @@ function registerIpc() {
             registerAccelerator: false,
             /* 渲染层传过来的是 PNG data URL，转成原生图像 */
             icon: item.icon ? nativeImage.createFromDataURL(item.icon) : undefined,
-            click: () => resolve(item.id ?? null)
-          });
+            /* 有子项就是二级菜单，父项本身不挂点击 */
+            submenu: item.submenu?.length ? item.submenu.map(toTemplateItem) : undefined,
+            click: item.submenu?.length ? undefined : () => resolve(item.id ?? null)
+          };
+
+      const template = (options?.items || []).map(toTemplateItem);
 
       const menu = Menu.buildFromTemplate(template);
 
@@ -213,7 +218,22 @@ function registerIpc() {
       const pick = process.env.VALKYRIE_MENU_PICK;
 
       if (pick) {
-        const matched = template.find(item => item.label && String(item.label).includes(pick));
+        /* 自动化钩子：二级菜单也要能找到 */
+        const findDeep = items => {
+          for (const item of items) {
+            if (item.label && String(item.label).includes(pick))
+              return item;
+
+            const nested = item.submenu ? findDeep(item.submenu) : null;
+
+            if (nested)
+              return nested;
+          }
+
+          return null;
+        };
+
+        const matched = findDeep(template);
         resolve(matched ? matched.id ?? null : null);
         return;
       }

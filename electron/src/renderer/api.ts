@@ -149,6 +149,8 @@ export interface NativeMenuItem {
   accelerator?: string;
   /** PNG data URL（系统菜单只吃位图） */
   icon?: string;
+  /** 二级菜单 */
+  submenu?: NativeMenuItem[];
 }
 
 declare global {

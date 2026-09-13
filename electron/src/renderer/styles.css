@@ -494,6 +494,18 @@ input, textarea, .console, .pre-wrap { user-select: text; }
   letter-spacing: .02em;
 }
 
+/* 二级菜单：父项右侧的小箭头，展开时父项保持高亮 */
+.menu-item .menu-item-chevron {
+  flex: 0 0 auto;
+  margin-left: 12px;
+  color: var(--muted);
+}
+
+.menu-item[data-state="open"] { background: var(--hover); }
+
+/* 子菜单面板沿用下拉菜单样式，只是去掉了最小宽度限制里的多余留白 */
+.menu-submenu { min-width: 160px; }
+
 /* 菜单图标保持自己的语义色，不随悬停变蓝变红（见文件末尾的 .icon-* 规则） */
 
 .menu-item[data-disabled] { color: var(--muted); cursor: default; }
