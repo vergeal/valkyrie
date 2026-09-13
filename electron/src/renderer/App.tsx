@@ -2707,8 +2707,8 @@ export function App() {
       ]
     },
     { separator: true },
-    { label: "导出 CSV", action: () => void exportResult("csv") },
-    { label: "导出 Excel", action: () => void exportResult("excel") },
+    { label: "导出 CSV", icon: "csv", action: () => void exportResult("csv") },
+    { label: "导出 Excel", icon: "excel", action: () => void exportResult("excel") },
     { separator: true },
     { label: "刷新", action: () => void runResultAction("result.reload", {}, "已刷新") }
   ];
@@ -3566,10 +3566,10 @@ export function App() {
                   <Icon name="refresh" />刷新
                 </button>
                 <button type="button" className="tbtn" onClick={() => void exportResult("csv")}>
-                  <Icon name="download" />导出 CSV
+                  <Icon name="csv" />导出 CSV
                 </button>
                 <button type="button" className="tbtn" onClick={() => void exportResult("excel")}>
-                  <Icon name="download" />导出 Excel
+                  <Icon name="excel" />导出 Excel
                 </button>
                 <span className="tbtn-push" aria-hidden="true" />
                 {/* 全表搜索：按任意单元格匹配过滤，命中的关键字在表格里黄底标出 */}

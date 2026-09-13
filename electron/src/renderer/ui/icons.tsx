@@ -79,6 +79,9 @@ export function SheetIcon({ size = 14, className }: { size?: number; className?:
 const ICONS: Record<string, ComponentType<{ size?: number; className?: string; strokeWidth?: number }>> = {
   database: Database,
   table: SheetIcon,
+  /* 导出用：Excel 沿用表格那个绿色图标，CSV 用文本文件图标 */
+  excel: SheetIcon,
+  csv: FileText,
   folder: Folder,
   folderOpen: FolderOpen,
   terminal: Terminal,
@@ -171,6 +174,7 @@ export const ICON_COLORS: Record<string, string> = {
   eraser: "#ea580c",
   list: "#0d9488",
   file: "#0d9488",
+  csv: "#0d9488",
   calendar: "#2563eb",
   calendarClock: "#2563eb",
   clock: "#2563eb"
