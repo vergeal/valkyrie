@@ -8,6 +8,8 @@ import { Select } from "./Select";
 interface ConnectionDialogProps {
   mode: "new" | "edit" | "copy";
   source?: SavedConnection | null;
+  /** 「新建连接 → 某种库」直接进来时的默认类型 */
+  initialType?: string;
   onClose: () => void;
   /** 保存成功回调；connect = 用户点的是「保存并连接」 */
   onSaved: (name: string, options?: { connect?: boolean }) => void;
@@ -34,7 +36,7 @@ interface FormState {
 }
 
 /** 连接类型预设：默认端口与说明（图标统一用各库的品牌 logo） */
-const DB_TYPES = [
+export const DB_TYPES = [
   { value: "mysql", label: "MySQL", port: "3306", hint: "MySQL 5.7 / 8.x" },
   { value: "postgresql", label: "PostgreSQL", port: "5432", hint: "PostgreSQL 12 及以上" },
   { value: "sqlite", label: "SQLite", port: "", hint: "本地单文件数据库" },
@@ -62,9 +64,17 @@ const BASE_FORM: FormState = {
   extraParams: ""
 };
 
-function initialState(mode: ConnectionDialogProps["mode"], source?: SavedConnection | null): FormState {
-  if (!source)
-    return { ...BASE_FORM };
+function initialState(
+  mode: ConnectionDialogProps["mode"],
+  source?: SavedConnection | null,
+  initialType?: string
+): FormState {
+  if (!source) {
+    /* 「新建连接 → MySQL / Redis …」菜单进来时带上对应的默认端口 */
+    const preset = DB_TYPES.find(item => item.value === initialType);
+
+    return preset ? { ...BASE_FORM, type: preset.value, port: preset.port } : { ...BASE_FORM };
+  }
 
   const restored: FormState = {
     ...BASE_FORM,
@@ -165,8 +175,8 @@ function buildUrl(form: FormState): string {
  * 连接编辑器：常规（连接名 / 类型 / 服务器 / 账号）+ 高级（参数、JDBC URL）。
  * 支持测试连接、保存、保存并连接；Enter 保存、Esc 关闭。
  */
-export function ConnectionDialog({ mode, source, onClose, onSaved }: ConnectionDialogProps) {
-  const [form, setForm] = useState<FormState>(() => initialState(mode, source));
+export function ConnectionDialog({ mode, source, initialType, onClose, onSaved }: ConnectionDialogProps) {
+  const [form, setForm] = useState<FormState>(() => initialState(mode, source, initialType));
   const [tab, setTab] = useState<"general" | "advanced">("general");
   const [status, setStatus] = useState<{ text: string; ok: boolean } | null>(null);
   const [testing, setTesting] = useState(false);

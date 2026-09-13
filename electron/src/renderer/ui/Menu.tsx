@@ -2,7 +2,7 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { acceleratorLabel } from "../keys";
 import { Icon } from "./icons";
 import { showMenu, type NativeMenuItem } from "../api";
-import { menuIconDataUrl } from "./menuIcon";
+import { imageDataUrl, menuIconDataUrl } from "./menuIcon";
 
 export interface MenuEntry {
   label?: string;
@@ -12,6 +12,8 @@ export interface MenuEntry {
   disabled?: boolean;
   /** 菜单项左侧图标（lucide 映射名，会栅格化成位图给系统菜单用） */
   icon?: string;
+  /** 位图图标（各数据库品牌 logo 之类的资源地址）：与 icon 二选一 */
+  image?: string;
   /** 图标颜色，默认中性灰 */
   iconColor?: string;
   /**
@@ -42,7 +44,9 @@ function renderEntries(
             className={`menu-item${entry.danger ? " is-danger" : ""}`}
             disabled={entry.disabled}
           >
-            {entry.icon && <Icon name={entry.icon} size={13} className="menu-item-icon" />}
+            {entry.image
+              ? <img className="menu-item-icon" src={entry.image} width={13} height={13} alt="" draggable={false} />
+              : entry.icon && <Icon name={entry.icon} size={13} className="menu-item-icon" />}
             <span className="menu-item-label">{entry.label}</span>
             <Icon name="chevronRight" size={12} className="menu-item-chevron" />
           </DropdownMenu.SubTrigger>
@@ -66,7 +70,9 @@ function renderEntries(
         disabled={entry.disabled}
         onSelect={() => entry.action?.()}
       >
-        {entry.icon && <Icon name={entry.icon} size={13} className="menu-item-icon" />}
+        {entry.image
+          ? <img className="menu-item-icon" src={entry.image} width={13} height={13} alt="" draggable={false} />
+          : entry.icon && <Icon name={entry.icon} size={13} className="menu-item-icon" />}
         <span className="menu-item-label">{entry.label}</span>
         {entry.accelerator && <span className="menu-item-accel">{acceleratorLabel(entry.accelerator)}</span>}
       </Item>
@@ -91,8 +97,12 @@ export async function popupNativeMenu(entries: MenuEntry[]) {
       enabled: !entry.disabled,
       /* 快捷键提示由系统右对齐显示，不注册成全局快捷键 */
       accelerator: entry.accelerator,
-      /* 有图标就先栅格化成 PNG，系统菜单才能显示 */
-      icon: entry.icon ? await menuIconDataUrl(entry.icon, entry.iconColor) ?? undefined : undefined,
+      /* 有图标就先栅格化成 PNG，系统菜单才能显示（品牌 logo 走 image） */
+      icon: entry.image
+        ? await imageDataUrl(entry.image) ?? undefined
+        : entry.icon
+          ? await menuIconDataUrl(entry.icon, entry.iconColor) ?? undefined
+          : undefined,
       /* 二级菜单：递归转换，id 用 2 / 2.1 这样的路径 */
       submenu: entry.children
         ? await Promise.all(entry.children.map((child, childIndex) => toNativeItem(child, `${id}.${childIndex}`)))

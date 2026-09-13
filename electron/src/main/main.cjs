@@ -22,6 +22,19 @@ function rendererEntry() {
 }
 
 /**
+ * 应用图标（沿用 FX 版那份）：开发时读仓库里的 assets/icon.png，
+ * 打包后由 electron-builder 放到 resources/icon.png。
+ */
+function appIconPath() {
+  const packaged = path.join(process.resourcesPath || "", "icon.png");
+
+  if (app.isPackaged && fs.existsSync(packaged))
+    return packaged;
+
+  return path.join(__dirname, "..", "..", "assets", "icon.png");
+}
+
+/**
  * 菜单栏：Windows / Linux 不需要浏览器默认菜单（里面的刷新、开发者工具等快捷键一并去掉），
  * macOS 则必须保留一份，否则 ⌘Q、⌘H 以及输入框里的 ⌘C / ⌘V 都会失效。
  * ⌘A 不注册成 selectAll role，改为转发给渲染层 —— 对象页 / 脚本页要全选表格里的行。
@@ -99,6 +112,8 @@ function createWindow() {
     show: false,
     backgroundColor: "#e7e9ee",
     title: "VALKYRIE",
+    /* 任务栏 / 窗口图标（与 FX 版同一张） */
+    icon: appIconPath(),
     /* Windows/Linux 使用自绘标题栏；macOS 保留原生红绿灯按钮 */
     frame: isMac,
     titleBarStyle: isMac ? "hiddenInset" : "default",
@@ -318,6 +333,9 @@ app.on("second-instance", () => {
 });
 
 app.whenReady().then(async () => {
+  /* Windows 任务栏按这个 id 归组，图标 / 名称才会跟着应用走 */
+  app.setAppUserModelId("com.changhong.valkyrie");
+
   /* 先把启动卡片立起来：数据层要起 JVM、读配置，这段时间用户得有反馈 */
   splash = createSplash();
   splash?.status("正在启动数据层…");

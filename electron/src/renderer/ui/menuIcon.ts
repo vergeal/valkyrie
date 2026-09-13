@@ -50,3 +50,46 @@ export function menuIconDataUrl(name: string, color?: string): Promise<string | 
   cache.set(key, pending);
   return pending;
 }
+
+/**
+ * 把位图资源（各数据库的品牌 logo）缩到菜单图标尺寸并转成 PNG data URL，
+ * 供系统原生菜单使用；同一地址只处理一次。
+ */
+export function imageDataUrl(url: string, size = ICON_SIZE): Promise<string | null> {
+  const key = `img|${url}|${size}`;
+  const cached = cache.get(key);
+
+  if (cached)
+    return cached;
+
+  const pending = (async () => {
+    try {
+      const image = new Image();
+
+      image.src = url;
+      await image.decode();
+
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+
+      const context = canvas.getContext("2d");
+
+      if (!context)
+        return null;
+
+      /* 等比缩放到方形画布内居中，避免 logo 被拉变形 */
+      const scale = Math.min(size / image.width, size / image.height);
+      const width = image.width * scale;
+      const height = image.height * scale;
+
+      context.drawImage(image, (size - width) / 2, (size - height) / 2, width, height);
+      return canvas.toDataURL("image/png");
+    } catch {
+      return null;
+    }
+  })();
+
+  cache.set(key, pending);
+  return pending;
+}

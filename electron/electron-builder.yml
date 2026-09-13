@@ -17,15 +17,20 @@ extraResources:
     to: server/valkyrie-server.jar
   - from: build/runtime
     to: runtime
+  # 应用图标：运行时窗口/任务栏图标用（打包 exe 图标见 win.icon）
+  - from: assets/icon.png
+    to: icon.png
 
 asar: true
 
 win:
+  icon: assets/icon.png
   target:
     - nsis
   artifactName: ${productName}-${version}-setup.${ext}
 
 mac:
+  icon: assets/icon.png
   target:
     - dmg
     - zip

@@ -17,6 +17,11 @@ const LOGOS: Record<string, string> = {
   dm: dmLogo
 };
 
+/** 某个数据库类型的品牌 logo 资源地址（原生菜单拿它栅格化小图标） */
+export function dbLogoUrl(type?: string): string | null {
+  return LOGOS[(type ?? "").toLowerCase()] ?? null;
+}
+
 interface DbLogoProps {
   type?: string;
   size?: number;

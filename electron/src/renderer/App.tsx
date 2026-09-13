@@ -30,7 +30,8 @@ import { ObjectInfo } from "./ui/ObjectInfo";
 import { TableDesign, type DesignColumn, type DesignIndex } from "./ui/TableDesign";
 import { TableList } from "./ui/TableList";
 import { ScriptList } from "./ui/ScriptList";
-import { ConnectionDialog } from "./ui/ConnectionDialog";
+import { ConnectionDialog, DB_TYPES } from "./ui/ConnectionDialog";
+import { dbLogoUrl } from "./ui/dbLogo";
 import { ConnectionManager } from "./ui/ConnectionManager";
 import { Dialog } from "./ui/Dialog";
 import { MenuButton, popupNativeMenu, type MenuEntry } from "./ui/Menu";
@@ -256,6 +257,8 @@ export function App() {
   const [connectionDialog, setConnectionDialog] = useState<{
     mode: "new" | "edit" | "copy";
     connection?: SavedConnection | null;
+    /** 「新建连接 → 某种库」进来时的默认类型 */
+    initialType?: string;
   } | null>(null);
   const [messageBox, setMessageBox] = useState<{ title: string; message: string } | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -2910,6 +2913,18 @@ export function App() {
     }
   }
 
+  /**
+   * 「新建连接」二级菜单：按库类型列出（同 FX 版的 ConnectionMenuBuilder），
+   * 带各库品牌 logo；点哪一项就直接开新建连接对话框，并带上该类型与默认端口。
+   */
+  function newConnectionMenuEntries(): MenuEntry[] {
+    return DB_TYPES.map(item => ({
+      label: item.label,
+      image: dbLogoUrl(item.value) ?? undefined,
+      action: () => setConnectionDialog({ mode: "new", initialType: item.value })
+    }));
+  }
+
   /* 右键菜单：与 JavaFX 版本保持一致 */
   function buildContextMenu(node: SchemaNode): MenuEntry[] {
     const container = node.kind === "TABLE" && node.hasChildren;
@@ -2920,6 +2935,7 @@ export function App() {
       const openCount = Object.keys(openSessions).length;
 
       return [
+        { label: "新建连接", icon: "plus", children: newConnectionMenuEntries() },
         { label: "新建查询", action: createQueryTab },
         { separator: true },
         {
@@ -3875,6 +3891,11 @@ export function App() {
     separator?: boolean;
     danger?: boolean;
     disabled?: boolean;
+    /** 应用内菜单项的图标（lucide 名）；二级菜单项用 children */
+    icon?: string;
+    /** 位图图标（各库品牌 logo 的资源地址） */
+    image?: string;
+    children?: MenuEntry[];
     /** 快捷键（Electron accelerator 写法），显示在菜单项右侧 */
     accelerator?: string;
   }
@@ -3890,7 +3911,7 @@ export function App() {
     {
       label: "文件",
       items: [
-        { label: "新建连接…", action: () => setConnectionDialog({ mode: "new" }) },
+        { label: "新建连接", icon: "plus", children: newConnectionMenuEntries() },
         { label: "编辑当前连接…", disabled: !currentConnection, action: () => setConnectionDialog({ mode: "edit", connection: currentConnection }) },
         { label: "复制当前连接…", disabled: !currentConnection, action: () => setConnectionDialog({ mode: "copy", connection: currentConnection }) },
         { label: "连接管理…", action: () => setManagerOpen(true) },
@@ -3960,7 +3981,7 @@ export function App() {
       label: "工具",
       items: [
         { label: "连接管理…", action: () => setManagerOpen(true) },
-        { label: "新建连接…", action: () => setConnectionDialog({ mode: "new" }) },
+        { label: "新建连接", icon: "plus", children: newConnectionMenuEntries() },
         { separator: true },
         { label: "选项…", action: () => setOptionsOpen(true) }
       ]
@@ -4831,6 +4852,7 @@ export function App() {
         <ConnectionDialog
           mode={connectionDialog.mode}
           source={connectionDialog.connection}
+          initialType={connectionDialog.initialType}
           onClose={() => setConnectionDialog(null)}
           onSaved={async (name, options) => {
             setConnectionDialog(null);
