@@ -18,6 +18,7 @@ Electron 只负责界面，数据库相关能力全部保留在 Java 侧。两�
 | 路径 | 说明 |
 | --- | --- |
 | `src/main/main.cjs` | Electron 主进程：拉起数据层、转发 IPC、单实例锁、退出清理 |
+| `src/main/splash.cjs` | 启动卡片：数据层起来之前显示进度，主窗口 ready-to-show 后关闭 |
 | `src/main/java-bridge.cjs` | 数据层进程管理与 JSON-RPC 客户端 |
 | `src/preload/preload.cjs` | 渲染层唯一通道（contextBridge） |
 | `src/renderer/` | React + Monaco 界面 |
@@ -60,6 +61,9 @@ npm start
 | `npm run start:ui` | 跳过数据层检查，只重建界面并启动（最快） |
 | `npm run smoke` | 无界面自检数据层链路 |
 | `npm run dist` | 打安装包 |
+
+启动时会先弹一张小的启动卡片（DBeaver 那种），依次显示`正在启动数据层…`、`正在加载界面…`，
+主窗口就绪后自动关闭（最短显示 700ms，避免一闪而过）。自动化脚本可设 `VALKYRIE_NO_SPLASH=1` 跳过。
 
 自检：
 

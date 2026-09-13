@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Valkyrie 正在启动</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --fg: #232936;
+    --muted: #6a7180;
+    --line: #e5e8ee;
+    --track: #e9ebf0;
+    --accent: #2f6feb;
+    --accent-2: #0e7490;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161b22;
+      --fg: #e6edf3;
+      --muted: #8b949e;
+      --line: #30363d;
+      --track: #21262d;
+      --accent: #58a6ff;
+      --accent-2: #39c5cf;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: transparent;
+    color: var(--fg);
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    user-select: none;
+    /* 无边框窗口：整块都能拖动 */
+    -webkit-app-region: drag;
+  }
+
+  .card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: 100%;
+    padding: 18px 22px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    /* 圆角交给系统窗口（roundedCorners），这里不再自己画，
+       否则会出现"方块窗口里套圆角卡片"的观感 */
+  }
+
+  .badge {
+    width: 46px;
+    height: 46px;
+    flex: 0 0 46px;
+    display: grid;
+    place-items: center;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #fff;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: .02em;
+  }
+
+  .body { flex: 1; min-width: 0; }
+
+  .title {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: .08em;
+  }
+
+  .version { color: var(--muted); font-size: 11.5px; font-weight: 400; letter-spacing: 0; }
+
+  .subtitle {
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  /* 不确定进度的细条：一条来回跑的亮条，等待期间一直有反馈 */
+  .bar {
+    position: relative;
+    height: 3px;
+    margin: 14px 0 8px;
+    overflow: hidden;
+    border-radius: 2px;
+    background: var(--track);
+  }
+
+  .bar::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 38%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    animation: slide 1.15s ease-in-out infinite;
+  }
+
+  @keyframes slide {
+    0% { left: -40%; }
+    100% { left: 100%; }
+  }
+
+  .status {
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">V</div>
+    <div class="body">
+      <div class="title">VALKYRIE <span class="version" id="version"></span></div>
+      <div class="subtitle">数据库客户端</div>
+      <div class="bar"></div>
+      <div class="status" id="status">正在启动…</div>
+    </div>
+  </div>
+
+  <script>
+    /* 主进程通过 executeJavaScript 调用这两个方法更新卡片内容 */
+    const params = new URLSearchParams(location.search);
+    const version = params.get("v");
+
+    if (version)
+      document.getElementById("version").textContent = "v" + version;
+
+    window.__setStatus = text => {
+      document.getElementById("status").textContent = text;
+    };
+  </script>
+</body>
+</html>

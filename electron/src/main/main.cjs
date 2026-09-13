@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeTheme, nativeImage } = require("electron");
 const path = require("node:path");
 const { JavaBridge } = require("./java-bridge.cjs");
+const { createSplash } = require("./splash.cjs");
 const { registerWindowControls, attachWindowState, disableBrowserShortcuts } = require("./window-controls.cjs");
 
 /* 防止用户重复启动导致起两份数据层进程，抢占同一份连接配置 */
@@ -13,6 +14,7 @@ if (!app.requestSingleInstanceLock()) {
 
 let bridge = null;
 let mainWindow = null;
+let splash = null;
 
 function rendererEntry() {
   return path.join(__dirname, "..", "..", "dist", "renderer", "index.html");
@@ -91,6 +93,9 @@ function createWindow() {
   mainWindow.once("ready-to-show", () => {
     mainWindow.maximize();
     mainWindow.show();
+    /* 主窗口出来了，启动卡片可以收掉 */
+    splash?.close();
+    splash = null;
   });
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -240,6 +245,10 @@ app.on("second-instance", () => {
 });
 
 app.whenReady().then(async () => {
+  /* 先把启动卡片立起来：数据层要起 JVM、读配置，这段时间用户得有反馈 */
+  splash = createSplash();
+  splash?.status("正在启动数据层…");
+
   bridge = new JavaBridge();
 
   bridge.on("log", chunk => process.stderr.write(`[data-layer] ${chunk}`));
@@ -264,11 +273,14 @@ app.whenReady().then(async () => {
   try {
     await bridge.start();
   } catch (error) {
+    splash?.close();
+    splash = null;
     dialog.showErrorBox("数据层启动失败", String(error && error.message ? error.message : error));
     app.quit();
     return;
   }
 
+  splash?.status("正在加载界面…");
   createWindow();
 
   app.on("activate", () => {
