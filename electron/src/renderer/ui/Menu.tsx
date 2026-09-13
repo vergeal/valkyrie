@@ -141,16 +141,21 @@ export function MenuButton(props: {
   entries: MenuEntry[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 额外的类名（比如面板里的小按钮样式） */
+  className?: string;
+  /** 按钮左侧图标（lucide 名） */
+  icon?: string;
 }) {
-  const { label, entries, open, onOpenChange } = props;
+  const { label, entries, open, onOpenChange, className, icon } = props;
 
   return (
     <DropdownMenu.Root open={open} onOpenChange={onOpenChange} modal={false}>
       <DropdownMenu.Trigger
-        className={`menu${open ? " is-open" : ""}`}
+        className={`menu${open ? " is-open" : ""}${className ? ` ${className}` : ""}`}
         /* Windows 习惯：鼠标移上去就展开 */
         onPointerEnter={() => onOpenChange(true)}
       >
+        {icon && <Icon name={icon} size={13} />}
         {label}
       </DropdownMenu.Trigger>
 

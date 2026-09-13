@@ -1330,6 +1330,70 @@ export function App() {
     return undefined;
   }
 
+  /**
+   * 标签对应的对象树节点（能定位才返回）。
+   * 数据页 / 设计页挂着自己的表节点，对象页挂着它的容器节点；
+   * 从脚本打开的查询控制台则回到树上那个脚本节点。
+   */
+  function treeNodeOfTab(tab: WorkTab | null | undefined): SchemaNode | null {
+    if (!tab)
+      return null;
+
+    if (tab.kind === "data" || tab.kind === "design")
+      return tab.node ?? null;
+
+    if (tab.kind === "objects")
+      return tab.node ?? null;
+
+    if (tab.kind === "query" && tab.script) {
+      const script = tab.script;
+
+      return Object.values(treeChildren)
+        .flat()
+        .find(node => node.kind === "QUERY" && node.path && node.label === script.name
+          && (node.catalog ?? "default") === script.catalog) ?? null;
+    }
+
+    return null;
+  }
+
+  /**
+   * 在对象树里定位节点：展开所有祖先、选中它、滚到可视范围。
+   * 只动对象树，不动工作区标签（不会把当前页顶掉）。
+   */
+  function revealTreeNode(node: SchemaNode) {
+    const chain: string[] = [];
+
+    for (let current: SchemaNode | null = node, guard = 0; current && guard < 16; guard++) {
+      chain.push(current.id);
+      current = parentTreeNode(current.id);
+    }
+
+    setExpanded(previous => {
+      const next = new Set(previous);
+      chain.forEach(id => next.add(id));
+      return next;
+    });
+    setActiveNode(node);
+
+    const scrollToRow = () => {
+      const row = [...document.querySelectorAll<HTMLElement>(".tree-row")]
+        .find(item => item.dataset.nodeId === node.id);
+
+      if (!row)
+        return false;
+
+      row.scrollIntoView({ block: "center" });
+      return true;
+    };
+
+    setStatus(`已定位到 ${node.label}`);
+
+    /* 行一般已经在 DOM 里；如果刚才展开了被收起的祖先，等这一帧渲染完再滚 */
+    if (!scrollToRow())
+      window.requestAnimationFrame(() => scrollToRow());
+  }
+
   /** 节点（或标签）对应的会话 */
   function sessionOfNode(node: SchemaNode | null | undefined, tab?: WorkTab | null): SessionState | null {
     return sessionByName(connectionOfNode(node) ?? connectionOfTab(tab));
@@ -3723,7 +3787,16 @@ export function App() {
     if (index < 0)
       return [];
 
+    const node = treeNodeOfTab(tabs[index]);
+
     return [
+      {
+        label: "在对象树中定位",
+        icon: "locate",
+        disabled: !node,
+        action: () => node && revealTreeNode(node)
+      },
+      { separator: true },
       { label: "关闭", disabled: tabs[index].kind === "objects", action: () => void closeTabs("current", id) },
       { label: "关闭左侧标签", disabled: index === 0, action: () => void closeTabs("left", id) },
       { label: "关闭右侧标签", disabled: index === tabs.length - 1, action: () => void closeTabs("right", id) },
@@ -4000,6 +4073,9 @@ export function App() {
     }
   ];
 
+  /* 当前标签在对象树里对应的节点（有才给「定位」按钮） */
+  const locatableNode = treeNodeOfTab(activeTab);
+
   return (
     <div className={`app${settings.gridZebra ? "" : " no-zebra"}${settings.gridRowNumbers ? "" : " no-rownum"}${IS_MAC ? " is-mac" : ""}${themeResolved === "dark" ? " is-dark" : " is-light"}`}>
       <header className="titlebar">
@@ -4043,8 +4119,14 @@ export function App() {
       </nav>
 
       <div className="toolbar">
-        <button type="button" className="tbtn" onClick={() => void refreshConnections()}>
-          <Icon name="refresh" />连接
+        {/* 新建连接（二级菜单选库类型）：原来这里是「刷新连接」按钮 */}
+        <button
+          type="button"
+          className="tbtn"
+          title="新建连接（选择数据库类型）"
+          onClick={() => void popupNativeMenu(newConnectionMenuEntries())}
+        >
+          <Icon name="plus" />新建连接
         </button>
         <button type="button" className="tbtn" onClick={createQueryTab}>
           <Icon name="terminal" />新建查询
@@ -4087,9 +4169,16 @@ export function App() {
         <aside className="side">
           <div className="side-head">
             <span className="side-title">对象导航</span>
-            <button type="button" className="icon-btn" aria-label="刷新连接" onClick={() => void refreshConnections()}>
-              <Icon name="refresh" size={13} />
-            </button>
+            <span className="side-head-actions">
+              <button
+                type="button"
+                className="side-action"
+                disabled={pending === "connections"}
+                onClick={() => void refreshConnections()}
+              >
+                <Icon name="refresh" size={13} />刷新连接
+              </button>
+            </span>
           </div>
 
           <div className="side-search">
@@ -4226,7 +4315,7 @@ export function App() {
             ))}
             </div>
 
-            <button type="button" className="work-tab-add" aria-label="新建查询" onClick={createQueryTab}>
+            <button type="button" className="work-tab-add" aria-label="新建查询" title="新建查询" onClick={createQueryTab}>
               <Icon name="plus" size={13} />
             </button>
 
@@ -4264,6 +4353,21 @@ export function App() {
           )}
 
           <div className={`pane-toolbar${tabs.length === 0 ? " is-hidden" : ""}`}>
+            {/* 当前标签在对象树里有对应节点时，给一个定位入口 */}
+            {locatableNode && (
+              <>
+                <button
+                  type="button"
+                  className="tbtn"
+                  title={`在对象树中定位 ${locatableNode.label}`}
+                  onClick={() => revealTreeNode(locatableNode)}
+                >
+                  <Icon name="locate" />定位
+                </button>
+                <span className="tbtn-sep" aria-hidden="true" />
+              </>
+            )}
+
             {activeTab?.kind === "query" && (
               <>
                 <button

@@ -356,6 +356,34 @@ input, textarea, .console, .pre-wrap { user-select: text; }
 
 .side-title { font-weight: 600; color: var(--text); font-size: 13px; }
 
+/* 对象导航标题栏右侧的两个小按钮：刷新连接 / 新增连接（新增连接是下拉二级菜单） */
+.side-head-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.side-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.side-action:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.side-action:disabled { opacity: .55; cursor: default; }
+
 .icon-btn {
   margin-left: auto;
   width: 24px;

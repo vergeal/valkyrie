@@ -112,7 +112,7 @@ export function ConnectionManager(props: ConnectionManagerProps) {
         </button>
         <span className="tbtn-push" aria-hidden="true" />
         <button type="button" className="tbtn" onClick={onRefresh}>
-          <Icon name="refresh" />刷新
+          <Icon name="refresh" />刷新连接
         </button>
         <span className="toolbar-search">
           <Icon name="search" size={13} />
