@@ -8,6 +8,7 @@ import {
 } from "react";
 import { isNumericType, type QueryColumn } from "../api";
 import { KEY } from "../keys";
+import { DateTimePicker } from "./DateTimePicker";
 import { Icon } from "./icons";
 
 interface CellRef {
@@ -259,7 +260,7 @@ export function ResultGrid(props: ResultGridProps) {
   /* 刚拖过列宽时忽略随后的 click，避免误触发"选中整列" */
   const lastResizeAt = useRef(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const pickerRef = useRef<HTMLInputElement | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!editing)
@@ -275,7 +276,8 @@ export function ResultGrid(props: ResultGridProps) {
     }
 
     if (bubbleMode) {
-      pickerRef.current?.focus();
+      /* 键盘事件由气泡容器统一处理，焦点落在卡片上即可 */
+      cardRef.current?.focus();
       return;
     }
 
@@ -373,12 +375,14 @@ export function ResultGrid(props: ResultGridProps) {
 
   /** 气泡的初始尺寸：宽度跟单元格走，高度按内容估一个合适值（之后用户可自由缩放） */
   function bubbleSizeFor(mode: BubbleMode, value: string, cellWidth?: number) {
-    /* 多行文本按行数估高度，时间选择器只要一行 */
-    const content = mode === "text" ? value.split("\n").length * 21 + 116 : 132;
+    /* 多行文本按行数估高度；日期是月历网格，日期时间再加一行时分秒 */
+    const content = mode === "text"
+      ? value.split("\n").length * 21 + 116
+      : mode === "datetime" ? 372 : mode === "date" ? 306 : 168;
 
     return {
       width: Math.round(Math.min(460, Math.max(320, cellWidth ?? 320))),
-      height: Math.round(Math.min(360, Math.max(mode === "text" ? 180 : 150, content)))
+      height: Math.round(Math.min(460, Math.max(mode === "text" ? 180 : 160, content)))
     };
   }
 
@@ -781,7 +785,25 @@ export function ResultGrid(props: ResultGridProps) {
           {/* 三角箭头：指向正在编辑的单元格 */}
           <span className="cell-bubble-arrow" style={{ left: bubblePos.arrow }} aria-hidden="true" />
 
-          <div className="cell-bubble" style={{ width: bubbleSize.width, height: bubbleSize.height }}>
+          <div
+            className="cell-bubble"
+            ref={cardRef}
+            /* 容器可聚焦：焦点落在气泡里，Esc / ⌘+Enter 才收得到键盘事件 */
+            tabIndex={-1}
+            style={{ width: bubbleSize.width, height: bubbleSize.height }}
+            onKeyDown={event => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cancelEdit();
+              } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault();
+
+                /* 时间选择器没选值时不提交，避免把空串写进日期字段 */
+                if (bubbleMode === "text" || draft)
+                  commitEdit();
+              }
+            }}
+          >
             <div className="cell-bubble-head">
               <span className="cell-bubble-title">
                 {columns[editing.col]?.label ?? "单元格"} · {BUBBLE_LABEL[bubbleMode]}
@@ -799,62 +821,14 @@ export function ResultGrid(props: ResultGridProps) {
                 spellCheck={false}
                 aria-label="多行编辑单元格"
                 onChange={event => setDraft(event.target.value)}
-                onKeyDown={event => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    cancelEdit();
-                  } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-                    event.preventDefault();
-                    commitEdit();
-                  }
-                }}
               />
             ) : (
-              /*
-               * 时间类字段：原生选择器负责取值（键盘分段编辑、校验都由它做），
-               * 外壳按应用主题重做 —— 去掉了原生那个不好看的日历图标，换成左侧
-               * 主题图标 + 右侧下拉按钮，聚焦的分段用强调色点亮。
-               */
-              <div className="cell-bubble-picker-row">
-                <span className="cell-bubble-picker-icon" aria-hidden="true">
-                  <Icon
-                    name={bubbleMode === "time" ? "clock" : bubbleMode === "date" ? "calendar" : "calendarClock"}
-                    size={14}
-                  />
-                </span>
-
-                <input
-                  ref={pickerRef}
-                  className="cell-bubble-picker"
-                  type={bubbleMode === "date" ? "date" : bubbleMode === "time" ? "time" : "datetime-local"}
-                  step={bubbleMode === "date" ? undefined : 1}
-                  value={toPickerValue(draft, bubbleMode)}
-                  aria-label={`选择${BUBBLE_LABEL[bubbleMode]}`}
-                  onChange={event => setDraft(fromPickerValue(event.target.value, bubbleMode, draft))}
-                  onKeyDown={event => {
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      cancelEdit();
-                    } else if (event.key === "Enter") {
-                      event.preventDefault();
-
-                      /* 没选值不提交，避免把空串写进日期字段 */
-                      if (draft)
-                        commitEdit();
-                    }
-                  }}
-                />
-
-                <button
-                  type="button"
-                  className="icon-btn cell-bubble-picker-open"
-                  title="打开系统选择面板"
-                  aria-label="打开系统选择面板"
-                  onClick={() => pickerRef.current?.showPicker?.()}
-                >
-                  <Icon name="chevronDown" size={13} />
-                </button>
-              </div>
+              /* 时间类字段：自绘的日期时间选择器（原生控件的分段编辑和系统面板样式改不动） */
+              <DateTimePicker
+                mode={bubbleMode}
+                value={toPickerValue(draft, bubbleMode)}
+                onChange={next => setDraft(fromPickerValue(next, bubbleMode, draft))}
+              />
             )}
 
             <div className="cell-bubble-actions">

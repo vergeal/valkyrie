@@ -902,66 +902,113 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
 .cell-bubble-input:focus { border-color: var(--accent); }
 
 /*
- * 时间类字段的选择器：原生控件用应用样式重做外壳 ——
- * 左边是主题图标，中间是分段编辑区，右边是唤起系统面板的下拉按钮。
+ * 自绘日期时间选择器：原生 `<input type="date">` 的分段编辑与系统日历面板
+ * 样式都改不动，索性自己画月历网格 + 时分秒下拉，配色和间距跟应用一致。
  */
-.cell-bubble-picker-row {
+.dtp {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 0;
+}
+
+.dtp-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 4px 0 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--field);
+  gap: 4px;
 }
 
-.cell-bubble-picker-row:focus-within { border-color: var(--accent); }
-
-.cell-bubble-picker-icon {
-  display: inline-flex;
-  flex: 0 0 auto;
-  color: var(--muted);
+.dtp-nav {
+  width: 22px;
+  height: 22px;
+  margin-left: 0;
 }
 
-.cell-bubble-picker {
+.dtp-title {
   flex: 1;
-  min-width: 0;
-  height: 30px;
-  padding: 0;
+  height: 24px;
   border: 0;
+  border-radius: 5px;
   background: transparent;
   color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.dtp-title:hover { background: var(--hover); }
+
+.dtp-week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.dtp-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  /* 6 行等分剩余高度：气泡被拉大时格子跟着变高 */
+  grid-auto-rows: 1fr;
+  gap: 2px;
+  flex: 1;
+  min-height: 0;
+}
+
+.dtp-day {
+  min-height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.dtp-day:hover { background: var(--hover); }
+.dtp-day.is-outside { color: var(--muted); opacity: .55; }
+.dtp-day.is-today { border-color: var(--accent); }
+
+.dtp-day.is-selected {
+  background: var(--accent);
+  color: light-dark(#ffffff, #0d1117);
+  font-weight: 600;
+}
+
+.dtp-time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.dtp-time-label {
+  margin-right: 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.dtp-colon { color: var(--muted); }
+
+.dtp-select {
+  height: 26px;
+  padding: 0 2px 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--field);
+  color: var(--text);
   font-family: var(--mono);
-  font-size: var(--grid-font-size, 14px);
+  font-size: 12.5px;
   font-variant-numeric: tabular-nums;
   outline: none;
 }
 
-/* 原生那个日历图标在深色下又黑又糊，直接去掉，用左边的主题图标代替 */
-.cell-bubble-picker::-webkit-calendar-picker-indicator { display: none; }
-
-/* 分段编辑：分隔符压淡，聚焦的那一段用强调色点亮 */
-.cell-bubble-picker::-webkit-datetime-edit { padding: 0; }
-.cell-bubble-picker::-webkit-datetime-edit-text { color: var(--muted); padding: 0 2px; }
-.cell-bubble-picker::-webkit-datetime-edit-year-field:focus,
-.cell-bubble-picker::-webkit-datetime-edit-month-field:focus,
-.cell-bubble-picker::-webkit-datetime-edit-day-field:focus,
-.cell-bubble-picker::-webkit-datetime-edit-hour-field:focus,
-.cell-bubble-picker::-webkit-datetime-edit-minute-field:focus,
-.cell-bubble-picker::-webkit-datetime-edit-second-field:focus,
-.cell-bubble-picker::-webkit-datetime-edit-ampm-field:focus {
-  background: var(--accent);
-  color: light-dark(#ffffff, #0d1117);
-  border-radius: 3px;
-  outline: none;
-}
-
-.cell-bubble-picker-open {
-  width: 24px;
-  height: 24px;
-  flex: 0 0 24px;
-}
+.dtp-select:focus { border-color: var(--accent); }
 
 .cell-bubble-actions {
   display: flex;
