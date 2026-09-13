@@ -22,9 +22,11 @@ Electron 只负责界面，数据库相关能力全部保留在 Java 侧。两�
 | `src/main/java-bridge.cjs` | 数据层进程管理与 JSON-RPC 客户端 |
 | `src/preload/preload.cjs` | 渲染层唯一通道（contextBridge） |
 | `src/renderer/` | React + Monaco 界面 |
-| `scripts/build-runtime.ps1` | jlink 生成数据层专用精简运行时 |
+| `assets/db/` | 各数据库品牌 logo（连接节点、连接下拉、连接管理器用） |
 | `scripts/rpc-smoke.cjs` | 无界面冒烟测试（本地 SQLite，不访问外部数据库） |
 | `scripts/ui-smoke.cjs` | 界面冒烟测试：真实窗口点击连接并执行，输出截图 |
+
+启动脚本在仓库根目录（`start.cmd` / `start.sh`），打包脚本在 `buildSrc/`，见根目录 README。
 
 ## 功能
 
@@ -44,23 +46,27 @@ Electron 只负责界面，数据库相关能力全部保留在 Java 侧。两�
 ## 开发
 
 ```powershell
-cd electron
-npm start
+# 仓库根目录：Windows 双击 start.cmd，或
+.\start.cmd
+
+# macOS / Linux
+./start.sh
 ```
 
-`npm start` 会自动完成：检查/安装依赖 → 数据层缺失或源码更新时用 Maven 重建 → 构建界面 → 启动客户端窗口。
-也可以直接双击 `electron\start.cmd`。改动前端界面时只需重启这一条命令；
-改动 Java 侧后 `dev.cjs` 会检测到源码比产物新并自动重新打包。
+启动脚本（`start.cjs`）自动完成：检查/安装依赖 → 数据层缺失或源码更新时用 Maven 重建 →
+构建界面 → 启动客户端窗口。改动前端界面时只需重启这一条命令；
+改动 Java 侧后它会检测到源码比产物新并自动重新打包。
 
 其它启动方式：
 
 | 命令 | 用途 |
 | --- | --- |
-| `npm start` | 默认：按需重建后启动 |
-| `npm run start:force` | 强制重建数据层后启动（改了 Java 但没触发重建时用） |
-| `npm run start:ui` | 跳过数据层检查，只重建界面并启动（最快） |
+| `node start.cjs` | 默认：按需重建后启动 |
+| `node start.cjs --force-server` | 强制重建数据层后启动 |
+| `node start.cjs --skip-server` | 跳过数据层检查，只重建界面并启动（最快） |
+| `npm start`（在 `electron/` 下） | 等价于 `node ../start.cjs`，给 IDE / npm 习惯用 |
 | `npm run smoke` | 无界面自检数据层链路 |
-| `npm run dist` | 打安装包 |
+| `buildSrc\build-windows.cmd` / `./buildSrc/build-macos.sh` | 打安装包 |
 
 启动时会先弹一张小的启动卡片（DBeaver 那种），依次显示`正在启动数据层…`、`正在加载界面…`，
 主窗口就绪后自动关闭（最短显示 700ms，避免一闪而过）。自动化脚本可设 `VALKYRIE_NO_SPLASH=1` 跳过。
@@ -94,12 +100,20 @@ $env:VALKYRIE_CANDIDATE="containers"; npx electron scripts/dom-probe.cjs
 ## 打包
 
 ```powershell
-# 生成精简运行时（约 47MB，不含 JavaFX）
-pwsh scripts/build-runtime.ps1
+# Windows：产出 electron\release\Valkyrie-0.1.0-setup.exe
+buildSrc\build-windows.cmd
 
-# 产出安装包：release/Valkyrie-0.1.0-setup.exe
-npm run dist
+# macOS：产出 electron/release/Valkyrie-0.1.0-x64.dmg 与 .zip
+./buildSrc/build-macos.sh
 ```
+
+打包脚本是 `buildSrc/package.cjs`（两个平台共用一份实现），流程：
+前端依赖 → 数据层 jar（`mvn package`）→ 精简 JRE（`jlink`，约 47MB）→ 界面（`vite build`）
+→ electron-builder。常用参数：`--dir` 只出免安装目录用于快速验证、`--arch arm64`、
+`--skip-server` / `--skip-runtime` 复用已有产物、`--jdk <path>` 指定 JDK。
+
+注意：jlink 产物与平台绑定，**要在目标系统上打包**（Windows 出 exe、macOS 出 dmg），
+跨平台调用会被脚本直接拦下并提示。打包需要 JDK（带 jlink）与 Maven。
 
 `electron-builder.yml` 会把三部分打进同一个安装包：
 

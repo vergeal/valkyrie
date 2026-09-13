@@ -9,11 +9,11 @@
     "build:renderer": "vite build",
     "typecheck": "tsc --noEmit",
     "build": "npm run build:renderer",
-    "start": "node scripts/dev.cjs",
-    "start:force": "node scripts/dev.cjs --force-server",
-    "start:ui": "npm run build:renderer && electron .",
+    "start": "node ../start.cjs",
+    "start:force": "node ../start.cjs --force-server",
+    "start:ui": "node ../start.cjs --skip-server",
     "smoke": "node scripts/rpc-smoke.cjs",
-    "dist": "npm run build && electron-builder"
+    "dist": "node ../buildSrc/package.cjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.23",

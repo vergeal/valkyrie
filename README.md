@@ -62,6 +62,23 @@
 
 ---
 
+## 打包与启动（Electron 客户端）
+
+客户端界面在 `electron/`，启动脚本在仓库根目录，打包脚本在 `buildSrc/`。
+
+| 平台 | 启动 | 打包安装包 |
+| --- | --- | --- |
+| Windows | 双击 `start.cmd` | `buildSrc\build-windows.cmd` → `electron\release\Valkyrie-0.1.0-setup.exe` |
+| macOS | `./start.sh` | `./buildSrc/build-macos.sh` → `electron/release/*.dmg` / `*.zip` |
+
+两个入口最终都执行 `start.cjs` / `buildSrc/package.cjs`（Node 写的，两份平台共用一套实现）：
+启动脚本负责依赖 → 数据层 → 界面 → 拉起客户端；打包脚本负责数据层 jar → 精简 JRE（jlink）
+→ 界面 → electron-builder 出安装包。jlink 产物与平台绑定，所以要在目标系统上打包。
+
+更细的参数（`--arch`、`--dir`、`--skip-server` 等）见 `electron/README.md`。
+
+---
+
 ## 开发规范
 
 - 遵循 Git commit log 规范：`模块: 功能描述 / bugfix: 修复问题 / doc: 文档更新`
