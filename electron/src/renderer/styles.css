@@ -815,6 +815,8 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
 .cell-bubble-anchor {
   position: fixed;
   z-index: 40;
+  /* 明确声明不是窗口拖动区：气泡里的按下 / 拖拽都属于气泡自己 */
+  -webkit-app-region: no-drag;
 }
 
 /*

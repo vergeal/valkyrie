@@ -785,7 +785,20 @@ export function ResultGrid(props: ResultGridProps) {
           className={`cell-bubble-anchor is-${bubblePos.placement}`}
           ref={bubbleRef}
           style={{ top: bubblePos.top, left: bubblePos.left }}
+          /*
+           * 气泡里的鼠标操作全部就地消化，不冒泡给底下的表格 ——
+           * 之前只挡住了 mousedown，点选 / 双击 / 右键 / 滚轮还会漏到网格上，
+           * 于是拖气泡、右键气泡都可能触发背景的框选或菜单。
+           */
           onMouseDown={event => event.stopPropagation()}
+          onMouseUp={event => event.stopPropagation()}
+          onClick={event => event.stopPropagation()}
+          onDoubleClick={event => event.stopPropagation()}
+          onWheel={event => event.stopPropagation()}
+          onContextMenu={event => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
         >
           {/* 三角箭头：指向正在编辑的单元格 */}
           <span className="cell-bubble-arrow" style={{ left: bubblePos.arrow }} aria-hidden="true" />
