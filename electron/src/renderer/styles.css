@@ -404,7 +404,11 @@ input, textarea, .console, .pre-wrap { user-select: text; }
 .tree-icon.kind-catalog { color: light-dark(#2563eb, #58a6ff); }
 .tree-icon.kind-schema { color: light-dark(#6d28d9, #a371f7); }
 .tree-icon.kind-table { color: light-dark(#1d4ed8, #79c0ff); }
+/* 查询脚本容器（kind-query）与脚本文件用同一档绿色 */
+.tree-icon.kind-query { color: light-dark(#15803d, #3fb950); }
 .tree-icon.is-script { color: light-dark(#15803d, #3fb950); }
+/* 根节点「我的连接」 */
+.tree-icon.kind-root { color: light-dark(#6d28d9, #a371f7); }
 
 /* 数据库品牌 logo（连接节点、连接下拉、连接管理器） */
 .db-logo {
