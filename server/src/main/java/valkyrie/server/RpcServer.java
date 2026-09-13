@@ -42,8 +42,10 @@ import java.nio.file.Path;
 
 import java.io.PrintStream;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -148,6 +150,7 @@ public class RpcServer
                         case "table.columns" -> tableColumns(params);
                         case "table.indexes" -> tableIndexes(params);
                         case "table.ddl" -> tableDdl(params);
+                        case "table.design" -> designTable(params);
                         case "sql.format" -> formatSql(params);
                         case "sql.suggest" -> suggestSql(params);
                         case "sql.warmSuggest" -> warmSuggest(params);
@@ -436,19 +439,8 @@ public class RpcServer
 
                 JSONArray columns = new JSONArray();
 
-                for (Column column : session.driver.getColumns(context, params.getString("table"))) {
-                        JSONObject json = new JSONObject();
-                        json.put("label", column.getLabel());
-                        json.put("name", column.getName());
-                        json.put("type", column.getType());
-                        json.put("index", column.getIndex());
-                        json.put("primary", column.isPrimary());
-                        json.put("notNull", column.isNotNull());
-                        json.put("autoIncrement", column.isAutoIncrement());
-                        json.put("defaultValue", column.getDefaultValue());
-                        json.put("comment", column.getComment());
-                        columns.add(json);
-                }
+                for (Column column : session.driver.getColumns(context, params.getString("table")))
+                        columns.add(columnJson(column));
 
                 JSONObject ret = new JSONObject();
                 ret.put("columns", columns);
@@ -462,14 +454,8 @@ public class RpcServer
 
                 JSONArray indexes = new JSONArray();
 
-                for (Index index : session.driver.getIndexes(context, params.getString("table"))) {
-                        JSONObject json = new JSONObject();
-                        json.put("name", index.getName());
-                        json.put("columnsText", index.getColumnsText());
-                        json.put("type", index.getType());
-                        json.put("visible", index.isVisible());
-                        indexes.add(json);
-                }
+                for (Index index : session.driver.getIndexes(context, params.getString("table")))
+                        indexes.add(indexJson(index));
 
                 JSONObject ret = new JSONObject();
                 ret.put("indexes", indexes);
@@ -485,6 +471,300 @@ public class RpcServer
                 ret.put("ddl", session.driver.showCreateTable(context, params.getString("table")));
 
                 return ret;
+        }
+
+        /**
+         * 保存表设计（设计表页的「保存」）。
+         *
+         * 界面发来的是整张表的目标状态（字段 + 索引），这里和库里的现状做差再下发，
+         * 顺序与 FX 版一致：主键要动先把自增摘掉（MySQL 不允许直接改带自增的主键）→
+         * 字段新增 / 修改 → 删字段 → 重建主键 → 恢复自增 → 索引增删改。
+         *
+         * 字段与索引都按名字对号入座；改过名的会带上 originalName，用来定位原来那一行。
+         */
+        private Object designTable(JSONObject params)
+        {
+                OpenConnection session = require(params.getString("sessionId"));
+                Session context = Session.of(params.getString("catalog"), params.getString("schema"));
+                String table = params.getString("table");
+                Driver driver = session.driver;
+
+                List<Column> original = driver.getColumns(context, table);
+                List<Column> wanted = parseColumns(params.getJSONArray("columns"));
+                List<Index> originalIndexes = driver.getIndexes(context, table);
+                List<Index> wantedIndexes = parseIndexes(params.getJSONArray("indexes"));
+
+                Map<String, Column> existing = new LinkedHashMap<>();
+
+                for (Column column : original)
+                        existing.put(column.getName(), column);
+
+                List<Column> added = new ArrayList<>();
+                List<Column> changed = new ArrayList<>();
+                List<String> kept = new ArrayList<>();
+
+                for (Column column : wanted) {
+                        String lookup = column.getOriginalName() != null ? column.getOriginalName() : column.getName();
+                        Column before = existing.get(lookup);
+
+                        if (before == null) {
+                                added.add(column);
+                                continue;
+                        }
+
+                        kept.add(before.getName());
+
+                        if (!sameColumn(before, column)) {
+                                /* 交给驱动的 CHANGE 分支：改名与改类型走同一条路 */
+                                column.setOriginalName(before.getName());
+                                changed.add(column);
+                        }
+                }
+
+                List<Column> removed = new ArrayList<>();
+
+                for (Column column : original)
+                        if (!kept.contains(column.getName()))
+                                removed.add(column);
+
+                List<Column> wantedPrimary = new ArrayList<>();
+                List<Column> originalPrimary = new ArrayList<>();
+
+                for (Column column : wanted)
+                        if (column.isPrimary())
+                                wantedPrimary.add(column);
+
+                for (Column column : original)
+                        if (column.isPrimary())
+                                originalPrimary.add(column);
+
+                boolean primaryChanged = !samePrimary(originalPrimary, wantedPrimary);
+                List<Column> autoIncrements = new ArrayList<>();
+
+                if (primaryChanged) {
+                        for (Column column : originalPrimary)
+                                if (column.isAutoIncrement()) {
+                                        column.setAutoIncrement(false);
+                                        autoIncrements.add(column);
+                                }
+
+                        if (!autoIncrements.isEmpty())
+                                driver.alterChange(context, table, autoIncrements);
+                }
+
+                List<Column> alters = new ArrayList<>(added);
+
+                alters.addAll(changed);
+
+                if (!alters.isEmpty())
+                        driver.alterChange(context, table, alters);
+
+                if (!removed.isEmpty())
+                        driver.dropColumns(context, table, removed);
+
+                if (primaryChanged) {
+                        driver.dropPrimaryKey(context, table);
+
+                        if (!wantedPrimary.isEmpty())
+                                driver.addPrimaryKey(context, table, wantedPrimary);
+
+                        if (!autoIncrements.isEmpty()) {
+                                autoIncrements.forEach(column -> column.setAutoIncrement(true));
+                                driver.alterChange(context, table, autoIncrements);
+                        }
+                }
+
+                applyIndexDesign(driver, context, table, originalIndexes, wantedIndexes);
+
+                JSONObject ret = new JSONObject();
+                JSONArray columns = new JSONArray();
+                JSONArray indexes = new JSONArray();
+
+                for (Column column : driver.getColumns(context, table))
+                        columns.add(columnJson(column));
+
+                for (Index index : driver.getIndexes(context, table))
+                        indexes.add(indexJson(index));
+
+                ret.put("columns", columns);
+                ret.put("indexes", indexes);
+                ret.put("ddl", driver.showCreateTable(context, table));
+                return ret;
+        }
+
+        /** 索引：改过结构的先删后建，只改可见性的走 alterVisible，不要的删掉 */
+        private void applyIndexDesign(
+                Driver driver, Session context, String table,
+                List<Index> original, List<Index> wanted)
+        {
+                Map<String, Index> existing = new LinkedHashMap<>();
+
+                for (Index index : original)
+                        existing.put(index.getName(), index);
+
+                List<Index> upserts = new ArrayList<>();
+                List<Index> visibility = new ArrayList<>();
+                List<String> kept = new ArrayList<>();
+
+                for (Index index : wanted) {
+                        String lookup = index.getOriginalName() != null ? index.getOriginalName() : index.getName();
+                        Index before = existing.get(lookup);
+
+                        if (before == null) {
+                                upserts.add(index);
+                                continue;
+                        }
+
+                        kept.add(before.getName());
+
+                        boolean structureChanged = !Objects.equals(before.getName(), index.getName())
+                                || !Objects.equals(normalizeIndexText(before.getColumnsText()), normalizeIndexText(index.getColumnsText()))
+                                || !Objects.equals(normalizeIndexText(before.getType()), normalizeIndexText(index.getType()));
+
+                        if (structureChanged) {
+                                index.setOriginalName(before.getName());
+                                upserts.add(index);
+                        } else if (before.isVisible() != index.isVisible()) {
+                                visibility.add(index);
+                        }
+                }
+
+                /*
+                 * 先后顺序很重要：
+                 * 1) 全新索引先建 —— 驱动不支持建索引时直接报错，库里现有索引一个都没动；
+                 * 2) 改动过的索引才「先删后建」（驱动不支持时仍会丢，这点和 FX 版一致）；
+                 * 3) 最后删用户删掉的。
+                 */
+                List<Index> fresh = new ArrayList<>();
+                List<Index> changed = new ArrayList<>();
+
+                for (Index index : upserts) {
+                        if (index.getOriginalName() == null)
+                                fresh.add(index);
+                        else
+                                changed.add(index);
+                }
+
+                if (!fresh.isEmpty())
+                        driver.alterIndexKeys(context, table, fresh);
+
+                if (!changed.isEmpty()) {
+                        driver.dropIndexKeys(context, table, changed);
+                        driver.alterIndexKeys(context, table, changed);
+                }
+
+                if (!visibility.isEmpty())
+                        driver.alterVisible(context, table, visibility);
+
+                for (Index index : original)
+                        if (!kept.contains(index.getName()))
+                                driver.dropIndexKeys(context, table, List.of(index));
+        }
+
+        private boolean sameColumn(Column before, Column after)
+        {
+                return Objects.equals(before.getName(), after.getName())
+                        && Objects.equals(before.getType(), after.getType())
+                        && Objects.equals(normalize(before.getDefaultValue()), normalize(after.getDefaultValue()))
+                        && Objects.equals(normalize(before.getComment()), normalize(after.getComment()))
+                        && before.isNotNull() == after.isNotNull()
+                        && before.isAutoIncrement() == after.isAutoIncrement();
+        }
+
+        private boolean samePrimary(List<Column> before, List<Column> after)
+        {
+                if (before.size() != after.size())
+                        return false;
+
+                for (int index = 0; index < before.size(); index++)
+                        if (!Objects.equals(before.get(index).getName(), after.get(index).getName()))
+                                return false;
+
+                return true;
+        }
+
+        private String normalize(String value)
+        {
+                return value == null || value.isBlank() ? null : value.trim();
+        }
+
+        /** 索引比较用：去空白 + 忽略大小写（驱动给出的 columnsText 可能带多余空格） */
+        private String normalizeIndexText(String value)
+        {
+                return value == null ? null : value.trim().replaceAll("\\s+", " ").toUpperCase();
+        }
+
+        private JSONObject columnJson(Column column)
+        {
+                JSONObject json = new JSONObject();
+                json.put("label", column.getLabel());
+                json.put("name", column.getName());
+                json.put("type", column.getType());
+                json.put("index", column.getIndex());
+                json.put("primary", column.isPrimary());
+                json.put("notNull", column.isNotNull());
+                json.put("autoIncrement", column.isAutoIncrement());
+                json.put("defaultValue", column.getDefaultValue());
+                json.put("comment", column.getComment());
+                return json;
+        }
+
+        private JSONObject indexJson(Index index)
+        {
+                JSONObject json = new JSONObject();
+                json.put("name", index.getName());
+                json.put("columnsText", index.getColumnsText());
+                json.put("type", index.getType());
+                json.put("visible", index.isVisible());
+                return json;
+        }
+
+        private List<Column> parseColumns(JSONArray array)
+        {
+                List<Column> columns = new ArrayList<>();
+
+                if (array == null)
+                        return columns;
+
+                for (int index = 0; index < array.size(); index++) {
+                        JSONObject json = array.getJSONObject(index);
+                        Column column = new Column();
+
+                        column.setName(json.getString("name"));
+                        column.setOriginalName(json.getString("originalName"));
+                        column.setType(json.getString("type"));
+                        column.setDefaultValue(json.getString("defaultValue"));
+                        column.setComment(json.getString("comment"));
+                        column.setNotNull(json.getBooleanValue("notNull"));
+                        column.setPrimary(json.getBooleanValue("primary"));
+                        column.setAutoIncrement(json.getBooleanValue("autoIncrement"));
+                        columns.add(column);
+                }
+
+                return columns;
+        }
+
+        private List<Index> parseIndexes(JSONArray array)
+        {
+                List<Index> indexes = new ArrayList<>();
+
+                if (array == null)
+                        return indexes;
+
+                for (int index = 0; index < array.size(); index++) {
+                        JSONObject json = array.getJSONObject(index);
+                        Index item = new Index();
+
+                        item.setName(json.getString("name"));
+                        item.setOriginalName(json.getString("originalName"));
+                        item.setColumnsText(json.getString("columnsText"));
+                        item.setType(json.getString("type"));
+                        item.setVisible(!json.containsKey("visible") || json.getBooleanValue("visible"));
+                        item.setOriginalVisible(item.isVisible());
+                        indexes.add(item);
+                }
+
+                return indexes;
         }
 
         private Object formatSql(JSONObject params)

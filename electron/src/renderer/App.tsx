@@ -27,7 +27,7 @@ import {
 import { Tree } from "./ui/Tree";
 import { ResultGrid } from "./ui/ResultGrid";
 import { ObjectInfo } from "./ui/ObjectInfo";
-import { TableDesign } from "./ui/TableDesign";
+import { TableDesign, type DesignColumn, type DesignIndex } from "./ui/TableDesign";
 import { TableList } from "./ui/TableList";
 import { ScriptList } from "./ui/ScriptList";
 import { ConnectionDialog } from "./ui/ConnectionDialog";
@@ -581,6 +581,91 @@ export function App() {
         tab.id === tabId && tab.kind === "query" ? { ...tab, sql: editor.getValue() } : tab));
     });
 
+    /*
+     * 空白标记块：插进来的空格 / Tab 都用终端绿的块标出来（行首缩进的、字符后面接着敲的
+     * 都算），一眼看得出敲了几个空白；一旦键入正文 / 换行 / 退格 / 移动光标就收掉 —— 空白本身留着。
+     *
+     * 只做渲染：按键全部交给 Monaco 自己处理（插入几个空格、怎么删、怎么缩进都不改），
+     * 这里只观测「插进来的空白」并把它画成绿块。
+     * 用装饰（decoration）而不是真选中：真选中会在打字时把缩进替换掉。
+     * 与选中蓝块不抢地方：一旦出现真选区（拖选 / Ctrl+A / 双击选词）绿块就让位。
+     */
+    const indentMarks = editor.createDecorationsCollection([]);
+    let indentMark: { anchor: number; end: number } | null = null;
+
+    function clearIndentMark() {
+      if (!indentMark)
+        return;
+
+      indentMark = null;
+      indentMarks.clear();
+    }
+
+    function markIndent(anchor: number, end: number) {
+      const model = editor.getModel();
+
+      if (!model)
+        return;
+
+      indentMark = { anchor, end };
+      indentMarks.set([{
+        range: monaco.Range.fromPositions(model.getPositionAt(anchor), model.getPositionAt(end)),
+        options: { className: "editor-indent-mark" }
+      }]);
+    }
+
+    editor.onKeyDown(event => {
+      if (event.keyCode === monaco.KeyCode.Enter || event.keyCode === monaco.KeyCode.Backspace
+        || event.keyCode === monaco.KeyCode.Delete || event.keyCode === monaco.KeyCode.Escape
+        || event.keyCode === monaco.KeyCode.LeftArrow || event.keyCode === monaco.KeyCode.RightArrow
+        || event.keyCode === monaco.KeyCode.UpArrow || event.keyCode === monaco.KeyCode.DownArrow
+        || event.keyCode === monaco.KeyCode.Home || event.keyCode === monaco.KeyCode.End)
+        clearIndentMark();
+    });
+
+    /*
+     * 观测文本改动：插进来的空白（Tab 或空格键，位置不限）→ 画成蓝块；
+     * 其它改动（打字、粘贴、输入法、撤销、删除）→ 收掉蓝块。
+     */
+    editor.onDidChangeModelContent(event => {
+      const model = editor.getModel();
+
+      if (!model || event.changes.length !== 1) {
+        clearIndentMark();
+        return;
+      }
+
+      const change = event.changes[0];
+      const start = change.rangeOffset;
+      const end = start + change.text.length;
+      const onlyWhitespace = change.text.length > 0 && /^[ \t]+$/.test(change.text);
+      const selection = editor.getSelection();
+      /* 光标就在插入内容的末尾（没有其它选区）才算"刚插进来的这段" */
+      const atEnd = selection != null && selection.isEmpty() && model.getOffsetAt(selection.getEndPosition()) === end;
+
+      if (onlyWhitespace && atEnd) {
+        /* 挨着上次的块继续敲就并进去，否则新起一块 */
+        const anchor = indentMark && indentMark.end === start ? indentMark.anchor : start;
+
+        markIndent(anchor, end);
+        return;
+      }
+
+      clearIndentMark();
+    });
+
+    editor.onMouseDown(() => clearIndentMark());
+    editor.onDidBlurEditorWidget(() => clearIndentMark());
+
+    /*
+     * 出现真选区（拖选 / Ctrl+A / 双击选词）就让位：
+     * 绿块画在装饰层，压在选中蓝块上会互相糊成一块，分不清哪个是哪个。
+     */
+    editor.onDidChangeCursorSelection(event => {
+      if (!event.selection.isEmpty())
+        clearIndentMark();
+    });
+
     /* SQL 智能提示：候选项来自 Java 侧上下文引擎，过滤/排序交给 Monaco */
     const completionProvider = monaco.languages.registerCompletionItemProvider("sql", {
       triggerCharacters: [" ", "."],
@@ -766,14 +851,30 @@ export function App() {
    * - 连接已关闭时改带连接名，数据层用那份快照继续提示表名 / 字段（内容是断开前的），
    *   快照也没有（比如从没在这个连接上敲过字）才退化成该方言的关键字。
    */
-  suggestionContextRef.current = {
-    sessionId: session?.sessionId,
-    connection: session?.name ?? consoleConnection(),
-    /* 查询页没显式选库时按当前连接的第一个库取元数据，保证提示里有表与字段 */
-    catalog: activeCatalog ?? catalogOptions[0]?.label,
-    schema: activeSchema,
-    type: session ? undefined : suggestionType()
-  };
+  suggestionContextRef.current = (() => {
+    /*
+     * 会话要和标签同属一条连接才能把 sessionId 递过去：
+     * 拿 A 的会话配 B 的库去问元数据，表名 / 字段提示会落空。
+     * 不是同一条连接时退化成「只给连接名」，数据层用断开时留下的快照照样能提示。
+     */
+    const tabConnection = activeTab ? connectionOfTab(activeTab) : undefined;
+    const sameConnection = Boolean(session && (!tabConnection || tabConnection === session.name));
+    /*
+     * 库要取会话里真实存在的那个：脚本按目录存放，目录名可能是 "default"
+     * 这类建库时并不存在的名字，直接拿去问元数据就只有关键字、没有表与字段。
+     */
+    const catalog = activeCatalog && catalogOptions.some(node => node.label === activeCatalog)
+      ? activeCatalog
+      : catalogOptions[0]?.label;
+
+    return {
+      sessionId: sameConnection ? session?.sessionId : undefined,
+      connection: sameConnection ? session?.name : (tabConnection ?? session?.name ?? lastSessionRef.current.name),
+      catalog: catalog ?? activeCatalog,
+      schema: activeSchema,
+      type: sameConnection ? undefined : suggestionType()
+    };
+  })();
 
   /**
    * 当前查询控制台属于哪个连接：优先用标签自己记的（断开后仍在），
@@ -2268,6 +2369,62 @@ export function App() {
 
   /* ------------------------------ 对象操作 ------------------------------ */
 
+  /**
+   * 保存表设计页的改动：字段新增 / 修改 / 改名的差异交给数据层算（见 RPC table.design），
+   * 这里只负责二次确认、下发、重新读结构与刷新对象列表。
+   */
+  async function saveTableDesign(
+    tabId: string, node: SchemaNode, columns: DesignColumn[], indexes: DesignIndex[]
+  ) {
+    const tab = tabs.find(item => item.id === tabId);
+    const target = sessionOfNode(node, tab);
+
+    if (!target)
+      return;
+
+    const confirmed = await askConfirm(
+      `确定保存对表 ${node.label} 的结构修改？会直接改动数据库对象，无法撤销。`,
+      "保存表设计",
+      true
+    );
+
+    if (!confirmed)
+      return;
+
+    setPending("saveDesign");
+
+    try {
+      const payload = await withBusy(() => invoke<{
+        columns: TableColumn[];
+        indexes: TableIndex[];
+        ddl: string;
+      }>("table.design", {
+        ...tableParams(target.sessionId, node),
+        columns,
+        indexes
+      }));
+
+      /* 数据层回读的结构直接落进标签，页面不用再等一次往返 */
+      updateTab(tabId, {
+        columns: payload.columns ?? [],
+        indexes: payload.indexes ?? [],
+        ddl: payload.ddl ?? "",
+        loading: false,
+        title: `设计: ${node.label}`
+      });
+
+      await refreshObjectList(node);
+      setStatus("表结构已保存");
+      flash("表结构已保存");
+    } catch (e) {
+      setError(messageOf(e));
+      /* 失败时把结构拉回库里的真实状态，别让页面停在一份没生效的改动上 */
+      await loadDesign(tabId, node);
+    } finally {
+      setPending(null);
+    }
+  }
+
   /** 执行表设计页里编辑过的 DDL（先确认，再重新读取结构与表列表） */
   async function applyTableDdl(tabId: string, node: SchemaNode, ddl: string) {
     const tab = tabs.find(item => item.id === tabId);
@@ -2959,8 +3116,8 @@ export function App() {
   }
 
   /*
-   * 窗口级快捷键：Ctrl+R 执行、Ctrl+A 全选、Ctrl+Shift+F 格式化、
-   * Ctrl+S / Ctrl+Shift+S 保存脚本。
+   * 窗口级快捷键：Ctrl+R 执行、Ctrl+A 全选、Ctrl+C 复制选区、
+   * Ctrl+Shift+F 格式化、Ctrl+S / Ctrl+Shift+S 保存脚本。
    * 编辑器有焦点时，除 Ctrl+R 外都交给 Monaco 自己的命令处理，避免同一个动作触发两次
    * （Monaco 没有绑 Ctrl+R，所以执行必须在这里兜底）。
    */
@@ -2972,6 +3129,21 @@ export function App() {
   saveShortcutRef.current = (saveAs?: boolean) => void saveActiveScript(saveAs);
   const selectAllRef = useRef<() => void>(() => undefined);
   selectAllRef.current = () => void selectAllInPage();
+  /**
+   * Ctrl+C 的复制入口：只有「结果表」上下文才接管（对象页 / 设计页没有网格，
+   * 那里的选区是上一个标签留下来的，不能拿它覆盖系统默认复制）。
+   * 返回 true 表示这次按键已经被处理，调用方要 preventDefault。
+   */
+  const gridCopyRef = useRef<() => boolean>(() => false);
+  gridCopyRef.current = () => {
+    const gridTab = activeTab?.kind === "query" || activeTab?.kind === "data";
+
+    if (!gridTab || !gridSelection || !currentResult?.rows)
+      return false;
+
+    void copyGridSelection();
+    return true;
+  };
 
   /* 结果集搜索防抖：连续输入时只在停顿后过滤一次（同 FX 版 100ms） */
   useEffect(() => {
@@ -2995,6 +3167,15 @@ export function App() {
   useEffect(() => onShortcut(action => {
     if (action === "select-all")
       selectAllRef.current();
+
+    /* macOS 菜单栏把 ⌘C 转发过来：结果表有选区就复制成制表符分隔，否则走系统默认复制 */
+    if (action === "copy") {
+      const focused = document.activeElement as HTMLElement | null;
+      const typing = Boolean(focused?.closest?.("input, textarea, .editor"));
+
+      if (typing || !gridCopyRef.current())
+        document.execCommand?.("copy");
+    }
   }), []);
 
   useEffect(() => {
@@ -3030,6 +3211,14 @@ export function App() {
       /* 其余快捷键在编辑器里交给 Monaco，避免同一个动作触发两次 */
       if (target?.closest?.(".editor"))
         return;
+
+      /* Ctrl+C：结果表有选区就复制成「制表符分隔」，粘到 Excel 直接分格 */
+      if (!shift && key === "c") {
+        if (!target?.closest?.("input, textarea") && gridCopyRef.current())
+          event.preventDefault();
+
+        return;
+      }
 
       if (shift && key === "f") {
         event.preventDefault();
@@ -3244,6 +3433,33 @@ export function App() {
       ? selection.colList
       : Array.from({ length: selection.c2 - selection.c1 + 1 }, (_, index) => selection.c1 + index);
 
+  /**
+   * 复制结果表选区为「制表符分隔」（Excel / WPS / 云表格直接粘）。
+   *
+   * 格子里出现制表符 / 换行 / 双引号时按 Excel 的惯例用双引号包起来（内部引号翻倍），
+   * 否则粘到 Excel 会被拆成多格；NULL 按空格子处理。
+   */
+  async function copyGridSelection() {
+    if (!gridSelection || !currentResult?.rows)
+      return;
+
+    const rows = selectionRows(gridSelection);
+    const cols = selectionCols(gridSelection);
+
+    const cell = (rowIndex: number, colIndex: number) => {
+      const value = currentResult.rows?.[rowIndex]?.[colIndex];
+      const text = value == null ? "" : String(value);
+
+      return /["\t\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+
+    const text = rows
+      .map(rowIndex => cols.map(colIndex => cell(rowIndex, colIndex)).join("\t"))
+      .join("\r\n");
+
+    await copyText(text);
+  }
+
   /** 删除选中行：先确认（删除只是待提交的修改，可回滚） */
   async function deleteSelectedRows() {
     if (!gridSelection)
@@ -3262,6 +3478,8 @@ export function App() {
 
   /* 结果表右键菜单（Radix ContextMenu 负责弹出/定位/关闭） */
   const gridMenuEntries: MenuEntry[] = [
+    { label: "复制选中单元格", icon: "copy", disabled: !gridSelection || !currentResult?.rows, action: () => void copyGridSelection() },
+    { separator: true },
     { label: "提交修改", disabled: !currentResult?.dirty, action: () => void runResultAction("result.commit", {}, "修改已提交") },
     { label: "新增行", disabled: !currentResult?.addable, action: () => void runResultAction("result.insert", {}, "已新增一行") },
     {
@@ -4300,6 +4518,8 @@ export function App() {
                   indexes={activeTab.indexes}
                   ddl={activeTab.ddl}
                   loading={activeTab.loading}
+                  onSave={(columns, indexes) => void saveTableDesign(activeTab.id, activeTab.node, columns, indexes)}
+                  onReload={() => void loadDesign(activeTab.id, activeTab.node)}
                   onApply={ddl => void applyTableDdl(activeTab.id, activeTab.node, ddl)}
                 />
               )}

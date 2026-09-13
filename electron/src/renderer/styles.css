@@ -1341,6 +1341,16 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
   border-radius: 5px;
 }
 
+/*
+ * 空白标记块：插进来的空格 / Tab 用终端绿（#00ff00）标出来，
+ * 和「选中」的蓝块刻意区分开；真选区出现时标记会让位，两者不会叠在一起。
+ * 见 App.tsx 里的 indent-mark 装饰。
+ */
+.monaco-editor .editor-indent-mark {
+  background: #00ff00;
+  border-radius: 2px;
+}
+
 /* ------------------------------ 下拉框（Radix Select） ------------------------------ */
 
 .vk-select-btn {
@@ -2093,6 +2103,52 @@ table.table-list .table-name-text {
 
 .design-scroll { flex: 1; min-height: 0; overflow: auto; }
 
+/* 设计表：工具条（页签 + 新增行 / 删除行 / 刷新 / 保存） */
+.design-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  padding: 3px 6px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--line);
+}
+
+.design-tabs {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.design-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.design-tab:hover { color: var(--text); }
+.design-tab.is-active {
+  background: var(--active);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.design-tab-count { color: var(--accent); font-size: 11px; font-variant-numeric: tabular-nums; }
+.design-toolbar-push { flex: 1; }
+.design-toolbar .tbtn.is-primary { color: var(--accent); }
+.design-problem { margin-left: 6px; color: var(--red); font-size: 12px; }
+
 table.design-table {
   width: 100%;
   border-collapse: collapse;
@@ -2124,6 +2180,41 @@ table.design-table .is-type { color: var(--accent); }
 table.design-table .is-muted { color: var(--muted); }
 table.design-table .is-null { color: var(--muted); font-style: italic; }
 .key-tag { display: inline-flex; align-items: center; gap: 3px; color: var(--amber); }
+
+/* 设计表里就地编辑的输入框：跟随单元格，不额外画框 */
+table.design-table td { padding: 2px 6px; }
+.design-input {
+  width: 100%;
+  min-width: 60px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.design-input:hover { border-color: var(--line); }
+.design-input:focus {
+  border-color: var(--accent);
+  background: var(--field);
+  outline: none;
+}
+
+.design-pick { width: 28px; text-align: center; }
+.design-seq { width: 56px; white-space: nowrap; }
+.design-flag { width: 52px; text-align: center; }
+.design-flag input { cursor: pointer; }
+.design-new {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+}
+.design-empty { padding: 12px; color: var(--muted); text-align: center; }
 
 .design-index {
   flex: 0 0 auto;

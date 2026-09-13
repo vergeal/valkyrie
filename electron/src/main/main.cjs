@@ -41,7 +41,16 @@ function installApplicationMenu() {
         { role: "redo" },
         { type: "separator" },
         { role: "cut" },
-        { role: "copy" },
+        /*
+         * 复制自己转发到渲染层：结果表有选区时复制成制表符分隔（粘 Excel 直接分格），
+         * 编辑器 / 输入框里仍然按系统默认复制（渲染层会执行 execCommand("copy")）。
+         * 用 role 的话这个组合键会被菜单直接吃掉，渲染层收不到。
+         */
+        {
+          label: "复制",
+          accelerator: "CommandOrControl+C",
+          click: (_item, window) => window?.webContents.send("valkyrie:shortcut", "copy")
+        },
         { role: "paste" },
         { role: "pasteAndMatchStyle" },
         { type: "separator" },

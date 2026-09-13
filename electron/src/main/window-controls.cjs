@@ -44,13 +44,12 @@ function attachWindowState(window) {
  * 前进后退等。编辑类快捷键（复制粘贴、撤销重做、全选）保留。
  * 注意：Ctrl+R 交给渲染层当作「执行查询」，Ctrl+W 交给编辑器做「智能扩选」，
  * 这两个都不能在这里拦掉（窗口本身没有系统菜单，Ctrl+W 不会误关窗口）。
+ * 同理 Ctrl+F / Ctrl+G / Ctrl+H 不能拦：浏览器那套「页内查找 / 找下一个 / 历史」
+ * 在桌面客户端里本来就没用，但它们是编辑器自己的「查找 / 跳到行 / 替换」。
  */
 function disableBrowserShortcuts(window) {
-  const blockedWithCtrl = new Set([
-    "p", "u", "f", "g", "j", "n", "o", "t",
-    /* macOS 的 ⌘H 是「隐藏应用」，交给系统处理 */
-    ...(process.platform === "darwin" ? [] : ["h"])
-  ]);
+  /* 这几个在浏览器里是打印 / 查看源码 / 下载 / 新窗口 / 打开文件 / 新标签页，客户端用不上 */
+  const blockedWithCtrl = new Set(["p", "u", "j", "n", "o", "t"]);
   /* 缩放快捷键不管带不带 Shift 都拦掉，网页缩放对桌面客户端没意义 */
   const zoomKeys = new Set(["+", "-", "=", "0"]);
   const blockedKeys = new Set(["f5", "f7", "f12"]);

@@ -330,7 +330,7 @@ public class MySQLSuggestions
                         Suggestion.ofKeyword("START"),
                         Suggestion.ofKeyword("STOP"),
                         Suggestion.ofKeyword("TRUNCATE"),
-                        Suggestion.ofKeyword("UPADTE"),
+                        Suggestion.ofKeyword("UPDATE"),
                         Suggestion.ofKeyword("SIGNAL"),
                         Suggestion.ofKeyword("RESIGNAL"),
                         Suggestion.ofKeyword("GET_DIAGNOSTICS"),
