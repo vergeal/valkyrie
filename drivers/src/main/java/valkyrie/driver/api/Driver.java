@@ -608,7 +608,7 @@ public abstract class Driver implements SQLExecutor
          * @throws UnsupportedOperationException 如果数据库方言不支持删除主键约束
          */
         public abstract void dropPrimaryKey(Session session, String table);
-        
+
         public void dropPrimaryKey(Session session, Table table) {
                 dropPrimaryKey(session, table.getName());
         }
