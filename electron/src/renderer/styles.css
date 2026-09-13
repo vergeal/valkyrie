@@ -63,6 +63,8 @@
   --icon-cyan: light-dark(#0891b2, #22d3ee);
   --icon-orange: light-dark(#ea580c, #fb923c);
   --icon-teal: light-dark(#0d9488, #2dd4bf);
+  /* 气泡的投影：弹出动画里和黄圈叠加使用 */
+  --bubble-shadow: 0 16px 40px light-dark(rgba(15, 23, 42, .18), rgba(1, 4, 9, .65));
   --mono: Consolas, "Cascadia Mono", "Courier New", monospace;
 
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
@@ -768,62 +770,57 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
   z-index: 40;
 }
 
-/* 弹出动画：从贴向单元格的那条边轻微放大 + 淡入（只在卡片上做，
-   避免 transform 影响锚点被测量出来的尺寸） */
+/*
+ * 弹出动画：从贴向单元格的那条边轻微放大出来，同时边缘亮一圈鲜艳的黄色、
+ * 随即收回原样 —— 像原生 popover 被"点"亮一下。动画只挂在卡片上，
+ * 锚点不参与 transform，避免影响定位测量。
+ */
 .cell-bubble-anchor .cell-bubble {
   transform-origin: 50% 0;
-  animation: bubble-pop-down 150ms cubic-bezier(.2, .85, .3, 1.05);
+  animation: bubble-pop 560ms cubic-bezier(.22, .8, .3, 1);
 }
 
-.cell-bubble-anchor.is-above .cell-bubble {
-  transform-origin: 50% 100%;
-  animation-name: bubble-pop-up;
-}
+.cell-bubble-anchor.is-above .cell-bubble { transform-origin: 50% 100%; }
 
-.cell-bubble-anchor .cell-bubble-arrow {
-  animation: bubble-arrow-in 150ms ease-out;
-}
+.cell-bubble-anchor .cell-bubble-arrow { animation: bubble-arrow-pop 560ms ease-out; }
 
-@keyframes bubble-pop-down {
-  from { opacity: 0; transform: translateY(-5px) scale(.97); }
-  to { opacity: 1; transform: none; }
-}
-
-@keyframes bubble-pop-up {
-  from { opacity: 0; transform: translateY(5px) scale(.97); }
-  to { opacity: 1; transform: none; }
-}
-
-@keyframes bubble-arrow-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-/* 单元格上的黄色提示：像打了一束聚光灯，指完就淡回编辑态底色 */
-table.grid td.is-editing.is-bubble {
-  animation: bubble-cell-flash 720ms ease-out;
-}
-
-@keyframes bubble-cell-flash {
+@keyframes bubble-pop {
   0% {
-    background: light-dark(#fde68a, #4d3f14);
-    box-shadow: inset 0 0 0 2px light-dark(#f59e0b, #d9a521);
+    opacity: 0;
+    transform: scale(.96);
+    border-color: var(--line);
+    box-shadow: var(--bubble-shadow);
   }
-  55% {
-    background: light-dark(#fef3c7, #3a3218);
-    box-shadow: inset 0 0 0 1px light-dark(#f59e0b, #d9a521);
+  35% {
+    opacity: 1;
+    transform: scale(1.02);
+    /* 鲜黄描边 + 外扩一圈光晕 */
+    border-color: #ffd60a;
+    box-shadow: 0 0 0 3px rgba(255, 214, 10, .85), var(--bubble-shadow);
+  }
+  70% {
+    transform: scale(1);
+    border-color: rgba(255, 214, 10, .55);
+    box-shadow: 0 0 0 2px rgba(255, 214, 10, .3), var(--bubble-shadow);
   }
   100% {
-    background: var(--field);
-    box-shadow: none;
+    opacity: 1;
+    transform: scale(1);
+    border-color: var(--line);
+    box-shadow: var(--bubble-shadow);
   }
+}
+
+/* 三角箭头跟着一起亮一下，和气泡边框连成一条黄边 */
+@keyframes bubble-arrow-pop {
+  0%, 100% { border-color: var(--line); }
+  35%, 62% { border-color: #ffd60a; }
 }
 
 /* 系统开了「减弱动态效果」就不做动画 */
 @media (prefers-reduced-motion: reduce) {
   .cell-bubble-anchor .cell-bubble,
-  .cell-bubble-anchor .cell-bubble-arrow,
-  table.grid td.is-editing.is-bubble { animation: none; }
+  .cell-bubble-anchor .cell-bubble-arrow { animation: none; }
 }
 
 .cell-bubble-arrow {
@@ -857,7 +854,7 @@ table.grid td.is-editing.is-bubble {
   background: var(--overlay);
   border: 1px solid var(--line);
   border-radius: 8px;
-  box-shadow: 0 16px 40px light-dark(rgba(15, 23, 42, .18), rgba(1, 4, 9, .65));
+  box-shadow: var(--bubble-shadow);
   /* 用户可以自由缩放：右下角拖拽（缩放需要 overflow 不是 visible） */
   resize: both;
   overflow: hidden;
