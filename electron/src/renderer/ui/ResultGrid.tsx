@@ -381,6 +381,8 @@ export function ResultGrid(props: ResultGridProps) {
                 />
               </th>
             ))}
+            {/* 占位列：把表头背景铺到容器右边缘 */}
+            <th className="grid-filler" aria-hidden="true" />
           </tr>
         </thead>
         <tbody>
@@ -469,13 +471,18 @@ export function ResultGrid(props: ResultGridProps) {
                     </td>
                   );
                 })}
+                {/* 占位列：斑马纹 / 当前行 / 脏数据 / 整行选中的底色一起铺满整行 */}
+                <td
+                  className={`grid-filler${rowMode && bounds && rowIndex >= bounds.r1 && rowIndex <= bounds.r2 ? " is-range" : ""}`}
+                  aria-hidden="true"
+                />
               </tr>
             );
           })}
           {/* 全表搜索没有命中时给一行提示，避免表格看起来是空的 */}
           {keyword && visibleRows.length === 0 && (
             <tr className="grid-none">
-              <td colSpan={columns.length + 1}>没有匹配“{search.trim()}”的数据</td>
+              <td colSpan={columns.length + 2}>没有匹配“{search.trim()}”的数据</td>
             </tr>
           )}
         </tbody>

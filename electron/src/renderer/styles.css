@@ -1168,7 +1168,13 @@ body.is-resizing * { cursor: inherit !important; }
 table.grid {
   /* 列宽由 ResultGrid 按数据实测给出 → 固定表格布局才不会被浏览器再分配 */
   table-layout: fixed;
+  /*
+   * 宽度取「内容宽度」与容器宽度的较大者：列比容器窄时由末尾的占位列吃掉
+   * 剩余空间（列宽实测值不变），行底色因此能铺满整行；列更宽时保持
+   * max-content，超出部分照常横向滚动。
+   */
   width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   /*
    * 对齐 Navicat 的观感：字更大、行更紧。
@@ -1266,6 +1272,17 @@ table.grid th.rownum { z-index: 3; }
 table.grid .is-num { text-align: left; }
 table.grid .is-null { color: var(--muted); font-style: italic; }
 /* 不给悬停加底色：只有用户点选/框选后才出现背景 */
+
+/*
+ * 占位列：本身不参与交互（不响应点击、不参与列选中），只负责把这一行的
+ * 底色（斑马纹 / 当前行 / 脏数据 / 整行选中）延伸到容器右边缘。
+ */
+table.grid .grid-filler {
+  width: auto;
+  padding: 0;
+  border: 0;
+  pointer-events: none;
+}
 
 /* 刷新反馈：整张表（含列头）先消失一瞬，再随新数据出现（像重新载入） */
 table.grid.is-refreshing,
