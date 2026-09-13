@@ -120,9 +120,13 @@ const BUBBLE_LABEL: Record<BubbleMode, string> = {
   time: "时间"
 };
 
-/** 「现在」按钮：按模式给出当前日期 / 日期时间 / 时间的控件值 */
-function nowFor(kind: "date" | "datetime" | "time"): string {
+/** 「现在 / 今天 / 明天」按钮：按模式给出当前日期 / 日期时间 / 时间的控件值 */
+function nowFor(kind: "date" | "datetime" | "time", dayOffset = 0): string {
   const now = new Date();
+
+  if (dayOffset)
+    now.setDate(now.getDate() + dayOffset);
+
   const pad = (value: number) => String(value).padStart(2, "0");
   const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   const time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
@@ -808,28 +812,51 @@ export function ResultGrid(props: ResultGridProps) {
                 }}
               />
             ) : (
-              /* 时间类字段：原生日期 / 日期时间 / 时间选择器，秒级精度 */
-              <input
-                ref={pickerRef}
-                className="cell-bubble-picker"
-                type={bubbleMode === "date" ? "date" : bubbleMode === "time" ? "time" : "datetime-local"}
-                step={bubbleMode === "date" ? undefined : 1}
-                value={toPickerValue(draft, bubbleMode)}
-                aria-label={`选择${BUBBLE_LABEL[bubbleMode]}`}
-                onChange={event => setDraft(fromPickerValue(event.target.value, bubbleMode, draft))}
-                onKeyDown={event => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    cancelEdit();
-                  } else if (event.key === "Enter") {
-                    event.preventDefault();
+              /*
+               * 时间类字段：原生选择器负责取值（键盘分段编辑、校验都由它做），
+               * 外壳按应用主题重做 —— 去掉了原生那个不好看的日历图标，换成左侧
+               * 主题图标 + 右侧下拉按钮，聚焦的分段用强调色点亮。
+               */
+              <div className="cell-bubble-picker-row">
+                <span className="cell-bubble-picker-icon" aria-hidden="true">
+                  <Icon
+                    name={bubbleMode === "time" ? "clock" : bubbleMode === "date" ? "calendar" : "calendarClock"}
+                    size={14}
+                  />
+                </span>
 
-                    /* 没选值不提交，避免把空串写进日期字段 */
-                    if (draft)
-                      commitEdit();
-                  }
-                }}
-              />
+                <input
+                  ref={pickerRef}
+                  className="cell-bubble-picker"
+                  type={bubbleMode === "date" ? "date" : bubbleMode === "time" ? "time" : "datetime-local"}
+                  step={bubbleMode === "date" ? undefined : 1}
+                  value={toPickerValue(draft, bubbleMode)}
+                  aria-label={`选择${BUBBLE_LABEL[bubbleMode]}`}
+                  onChange={event => setDraft(fromPickerValue(event.target.value, bubbleMode, draft))}
+                  onKeyDown={event => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      cancelEdit();
+                    } else if (event.key === "Enter") {
+                      event.preventDefault();
+
+                      /* 没选值不提交，避免把空串写进日期字段 */
+                      if (draft)
+                        commitEdit();
+                    }
+                  }}
+                />
+
+                <button
+                  type="button"
+                  className="icon-btn cell-bubble-picker-open"
+                  title="打开系统选择面板"
+                  aria-label="打开系统选择面板"
+                  onClick={() => pickerRef.current?.showPicker?.()}
+                >
+                  <Icon name="chevronDown" size={13} />
+                </button>
+              </div>
             )}
 
             <div className="cell-bubble-actions">
@@ -837,6 +864,24 @@ export function ResultGrid(props: ResultGridProps) {
                 {bubbleMode === "text" ? `${draft.split("\n").length} 行 · ${draft.length} 字符` : (draft || "未选择")}
               </span>
               <span className="tbtn-push" aria-hidden="true" />
+              {bubbleMode === "date" && (
+                <>
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    onClick={() => setDraft(fromPickerValue(nowFor("date"), "date", draft))}
+                  >
+                    今天
+                  </button>
+                  <button
+                    type="button"
+                    className="mini-btn"
+                    onClick={() => setDraft(fromPickerValue(nowFor("date", 1), "date", draft))}
+                  >
+                    明天
+                  </button>
+                </>
+              )}
               {bubbleMode !== "text" && (
                 <button
                   type="button"

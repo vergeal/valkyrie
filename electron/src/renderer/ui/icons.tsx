@@ -1,10 +1,13 @@
 import {
   ArrowDownToLine,
+  Calendar,
+  CalendarClock,
   CircleAlert,
   CircleCheck,
   Check,
   ChevronDown,
   ChevronRight,
+  Clock,
   Code,
   Columns3,
   Copy,
@@ -102,6 +105,9 @@ const ICONS: Record<string, ComponentType<{ size?: number; className?: string; s
   sun: Sun,
   moon: Moon,
   system: MonitorSmartphone,
+  calendar: Calendar,
+  calendarClock: CalendarClock,
+  clock: Clock,
   /* 连接 / 表单类 */
   server: Server,
   host: HardDrive,
@@ -162,7 +168,10 @@ export const ICON_COLORS: Record<string, string> = {
   sun: "#d97706",
   eraser: "#ea580c",
   list: "#0d9488",
-  file: "#0d9488"
+  file: "#0d9488",
+  calendar: "#2563eb",
+  calendarClock: "#2563eb",
+  clock: "#2563eb"
 };
 
 interface IconProps {

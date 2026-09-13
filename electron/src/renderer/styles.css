@@ -904,24 +904,67 @@ table.grid td.is-editing.is-bubble {
 
 .cell-bubble-input:focus { border-color: var(--accent); }
 
-/* 时间类字段的选择器：单行、等宽，和表格里的时间文本对齐 */
-.cell-bubble-picker {
-  width: 100%;
-  height: 30px;
-  padding: 0 8px;
+/*
+ * 时间类字段的选择器：原生控件用应用样式重做外壳 ——
+ * 左边是主题图标，中间是分段编辑区，右边是唤起系统面板的下拉按钮。
+ */
+.cell-bubble-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 4px 0 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--field);
+}
+
+.cell-bubble-picker-row:focus-within { border-color: var(--accent); }
+
+.cell-bubble-picker-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.cell-bubble-picker {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--text);
   font-family: var(--mono);
   font-size: var(--grid-font-size, 14px);
+  font-variant-numeric: tabular-nums;
   outline: none;
 }
 
-.cell-bubble-picker:focus { border-color: var(--accent); }
+/* 原生那个日历图标在深色下又黑又糊，直接去掉，用左边的主题图标代替 */
+.cell-bubble-picker::-webkit-calendar-picker-indicator { display: none; }
 
-/* 深色主题下把原生日期图标反相，否则黑图标糊在深底上 */
-.app.is-dark .cell-bubble-picker::-webkit-calendar-picker-indicator { filter: invert(.85); }
+/* 分段编辑：分隔符压淡，聚焦的那一段用强调色点亮 */
+.cell-bubble-picker::-webkit-datetime-edit { padding: 0; }
+.cell-bubble-picker::-webkit-datetime-edit-text { color: var(--muted); padding: 0 2px; }
+.cell-bubble-picker::-webkit-datetime-edit-year-field:focus,
+.cell-bubble-picker::-webkit-datetime-edit-month-field:focus,
+.cell-bubble-picker::-webkit-datetime-edit-day-field:focus,
+.cell-bubble-picker::-webkit-datetime-edit-hour-field:focus,
+.cell-bubble-picker::-webkit-datetime-edit-minute-field:focus,
+.cell-bubble-picker::-webkit-datetime-edit-second-field:focus,
+.cell-bubble-picker::-webkit-datetime-edit-ampm-field:focus {
+  background: var(--accent);
+  color: light-dark(#ffffff, #0d1117);
+  border-radius: 3px;
+  outline: none;
+}
+
+.cell-bubble-picker-open {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+}
 
 .cell-bubble-actions {
   display: flex;
