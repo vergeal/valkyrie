@@ -230,6 +230,8 @@ export function ResultGrid(props: ResultGridProps) {
   const [bubbleMode, setBubbleMode] = useState<BubbleMode | null>(null);
   /* 尺寸只在打开时算一次：之后用户可以自由缩放，滚动重定位不覆盖它 */
   const [bubbleSize, setBubbleSize] = useState<{ width: number; height: number } | null>(null);
+  /* 气泡里手输的日期时间不合法时，禁止提交 */
+  const [bubbleInvalid, setBubbleInvalid] = useState(false);
   const [bubblePos, setBubblePos] = useState<{
     top: number; left: number; arrow: number; placement: "below" | "above";
   } | null>(null);
@@ -371,6 +373,7 @@ export function ResultGrid(props: ResultGridProps) {
     setBubbleMode(mode);
     setBubbleSize(size);
     setBubblePos(rect ? placeBubble(rect, size) : null);
+    setBubbleInvalid(false);
   }
 
   /** 气泡的初始尺寸：宽度跟单元格走，高度按内容估一个合适值（之后用户可自由缩放） */
@@ -378,11 +381,11 @@ export function ResultGrid(props: ResultGridProps) {
     /* 多行文本按行数估高度；日期是月历网格，日期时间再加一行时分秒 */
     const content = mode === "text"
       ? value.split("\n").length * 21 + 116
-      : mode === "datetime" ? 372 : mode === "date" ? 306 : 168;
+      : mode === "datetime" ? 416 : mode === "date" ? 350 : 214;
 
     return {
       width: Math.round(Math.min(460, Math.max(320, cellWidth ?? 320))),
-      height: Math.round(Math.min(460, Math.max(mode === "text" ? 180 : 160, content)))
+      height: Math.round(Math.min(520, Math.max(mode === "text" ? 180 : 200, content)))
     };
   }
 
@@ -539,6 +542,9 @@ export function ResultGrid(props: ResultGridProps) {
     committing.current = true;
     const current = rows[editing.row]?.[editing.col] ?? null;
 
+    if (bubbleInvalid)
+      return;
+
     if (draft !== current)
       onCellCommit?.(editing.row, editing.col, draft);
 
@@ -546,6 +552,7 @@ export function ResultGrid(props: ResultGridProps) {
     setBubbleMode(null);
     setBubbleSize(null);
     setBubblePos(null);
+    setBubbleInvalid(false);
   }
 
   /** 放弃这次编辑（Escape / 气泡上的取消按钮） */
@@ -554,6 +561,7 @@ export function ResultGrid(props: ResultGridProps) {
     setBubbleMode(null);
     setBubbleSize(null);
     setBubblePos(null);
+    setBubbleInvalid(false);
   }
 
   /* 气泡编辑时点空白处提交，行为与单元格内联输入框的失焦提交一致 */
@@ -828,6 +836,7 @@ export function ResultGrid(props: ResultGridProps) {
                 mode={bubbleMode}
                 value={toPickerValue(draft, bubbleMode)}
                 onChange={next => setDraft(fromPickerValue(next, bubbleMode, draft))}
+                onValidityChange={setBubbleInvalid}
               />
             )}
 
@@ -868,7 +877,7 @@ export function ResultGrid(props: ResultGridProps) {
                 type="button"
                 className="mini-btn is-default"
                 /* 时间选择器没选值时不提交，避免把空串写进日期字段 */
-                disabled={bubbleMode !== "text" && !draft}
+                disabled={bubbleMode !== "text" && (!draft || bubbleInvalid)}
                 onClick={commitEdit}
               >
                 保存
