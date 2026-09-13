@@ -1,5 +1,13 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode
+} from "react";
 import { isNumericType, type QueryColumn } from "../api";
+import { KEY } from "../keys";
 import { Icon } from "./icons";
 
 interface CellRef {
@@ -129,6 +137,9 @@ export function ResultGrid(props: ResultGridProps) {
   const [focus, setFocus] = useState<CellRef | null>(null);
   const [editing, setEditing] = useState<CellRef | null>(null);
   const [draft, setDraft] = useState("");
+  /* 多行文本走气泡里的多行编辑器（单行仍在单元格内联编辑） */
+  const [bubbleEdit, setBubbleEdit] = useState(false);
+  const [bubbleBox, setBubbleBox] = useState<{ top: number; left: number; width: number } | null>(null);
   /* 选区模式：整行（从行号列拖）/ 矩形（从数据单元格拖） */
   const [rowMode, setRowMode] = useState(false);
   /* 整列（从列头拖） */
@@ -147,6 +158,9 @@ export function ResultGrid(props: ResultGridProps) {
   /* 手动拖过的列宽优先；其余按当前数据实测 */
   const [manualWidths, setManualWidths] = useState<Record<number, number>>({});
   const [autoWidths, setAutoWidths] = useState<Record<number, number>>({});
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const bubbleRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const dragging = useRef(false);
   /* 防止 blur 与主动提交重复触发 */
   const committing = useRef(false);
@@ -155,9 +169,66 @@ export function ResultGrid(props: ResultGridProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    if (editing)
-      inputRef.current?.focus();
-  }, [editing]);
+    if (!editing)
+      return;
+
+    if (bubbleEdit) {
+      const area = textareaRef.current;
+
+      area?.focus();
+      /* 光标落到末尾：接着往下写不用先点一下 */
+      area?.setSelectionRange(area.value.length, area.value.length);
+      return;
+    }
+
+    inputRef.current?.focus();
+  }, [editing, bubbleEdit]);
+
+  /*
+   * 气泡定位：贴着正在编辑的单元格浮出 —— 下方放得下就放下方，放不下翻到上方，
+   * 左右再夹到窗口内。表格内部滚动、窗口缩放、气泡被手动拉高时都重新贴一次。
+   */
+  useLayoutEffect(() => {
+    if (!bubbleEdit || !editing) {
+      setBubbleBox(null);
+      return;
+    }
+
+    const place = () => {
+      const anchor = wrapRef.current?.querySelector("td.is-editing")?.getBoundingClientRect();
+
+      if (!anchor)
+        return;
+
+      const width = Math.round(Math.min(460, Math.max(300, anchor.width)));
+      const height = bubbleRef.current?.offsetHeight ?? 200;
+      const spaceBelow = window.innerHeight - anchor.bottom;
+      const top = spaceBelow >= height + 12
+        ? anchor.bottom + 6
+        : Math.max(8, anchor.top - height - 6);
+      const left = Math.min(Math.max(8, anchor.left), Math.max(8, window.innerWidth - width - 8));
+
+      setBubbleBox({ top: Math.round(top), left: Math.round(left), width });
+    };
+
+    place();
+
+    const frame = window.requestAnimationFrame(place);
+    const observer = new ResizeObserver(place);
+
+    if (bubbleRef.current)
+      observer.observe(bubbleRef.current);
+
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [bubbleEdit, editing]);
 
   useEffect(() => {
     const stop = () => { dragging.current = false; };
@@ -288,9 +359,13 @@ export function ResultGrid(props: ResultGridProps) {
     if (!editable)
       return;
 
+    const value = rows[cell.row]?.[cell.col] ?? "";
+
     committing.current = false;
     setEditing(cell);
-    setDraft(rows[cell.row]?.[cell.col] ?? "");
+    setDraft(value);
+    /* 含换行的文本用气泡里的多行编辑器 */
+    setBubbleEdit(value.includes("\n"));
   }
 
   function commitEdit() {
@@ -304,7 +379,35 @@ export function ResultGrid(props: ResultGridProps) {
       onCellCommit?.(editing.row, editing.col, draft);
 
     setEditing(null);
+    setBubbleEdit(false);
+    setBubbleBox(null);
   }
+
+  /** 放弃这次编辑（Escape / 气泡上的取消按钮） */
+  function cancelEdit() {
+    setEditing(null);
+    setBubbleEdit(false);
+    setBubbleBox(null);
+  }
+
+  /* 气泡编辑时点空白处提交，行为与单元格内联输入框的失焦提交一致 */
+  const commitRef = useRef(commitEdit);
+  commitRef.current = commitEdit;
+
+  useEffect(() => {
+    if (!bubbleEdit || !editing)
+      return;
+
+    const onMouseDown = (event: MouseEvent) => {
+      if (bubbleRef.current?.contains(event.target as Node))
+        return;
+
+      commitRef.current();
+    };
+
+    window.addEventListener("mousedown", onMouseDown, true);
+    return () => window.removeEventListener("mousedown", onMouseDown, true);
+  }, [bubbleEdit, editing]);
 
   /**
    * 单元格左键按下：无论当前是否在编辑、是否有菜单打开，
@@ -335,7 +438,7 @@ export function ResultGrid(props: ResultGridProps) {
     return <div className="empty">执行结果将显示在这里</div>;
 
   return (
-    <div className="grid-wrap">
+    <div className="grid-wrap" ref={wrapRef}>
       <table className={`grid${editable ? " is-editable" : ""}${refreshing ? " is-refreshing" : ""}`}>
         <thead>
           <tr>
@@ -449,7 +552,7 @@ export function ResultGrid(props: ResultGridProps) {
                         onContextMenu?.();
                       }}
                     >
-                      {isEditing ? (
+                      {isEditing && !bubbleEdit ? (
                         <input
                           ref={inputRef}
                           className="cell-editor"
@@ -459,10 +562,18 @@ export function ResultGrid(props: ResultGridProps) {
                           onKeyDown={event => {
                             if (event.key === "Enter") {
                               event.preventDefault();
+
+                              /* Shift / Alt + Enter：转成多行编辑气泡，并换到下一行 */
+                              if (event.shiftKey || event.altKey) {
+                                setDraft(`${draft}\n`);
+                                setBubbleEdit(true);
+                                return;
+                              }
+
                               commitEdit();
                             } else if (event.key === "Escape") {
                               event.preventDefault();
-                              setEditing(null);
+                              cancelEdit();
                             }
                           }}
                           onBlur={commitEdit}
@@ -489,6 +600,46 @@ export function ResultGrid(props: ResultGridProps) {
       </table>
 
       {rows.length === 0 && <div className="empty">没有数据</div>}
+
+      {/* 多行编辑气泡：贴着单元格上方或下方浮出，⌘/Ctrl+Enter 保存、Esc 取消 */}
+      {bubbleEdit && editing && bubbleBox && (
+        <div
+          className="cell-bubble"
+          ref={bubbleRef}
+          style={{ top: bubbleBox.top, left: bubbleBox.left, width: bubbleBox.width }}
+          onMouseDown={event => event.stopPropagation()}
+        >
+          <div className="cell-bubble-head">
+            <span className="cell-bubble-title">{columns[editing.col]?.label ?? "单元格"} · 多行编辑</span>
+            <span className="cell-bubble-hint">Enter 换行 · {KEY.runEnter} 保存 · Esc 取消</span>
+          </div>
+
+          <textarea
+            ref={textareaRef}
+            className="cell-bubble-input"
+            value={draft}
+            spellCheck={false}
+            aria-label="多行编辑单元格"
+            onChange={event => setDraft(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cancelEdit();
+              } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault();
+                commitEdit();
+              }
+            }}
+          />
+
+          <div className="cell-bubble-actions">
+            <span className="cell-bubble-count">{draft.split("\n").length} 行 · {draft.length} 字符</span>
+            <span className="tbtn-push" aria-hidden="true" />
+            <button type="button" className="mini-btn" onClick={cancelEdit}>取消</button>
+            <button type="button" className="mini-btn is-default" onClick={commitEdit}>保存</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
