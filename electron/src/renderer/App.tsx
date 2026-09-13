@@ -39,7 +39,7 @@ import { Select } from "./ui/Select";
 import { Icon } from "./ui/icons";
 import { LogConsole, appendLog, errorRecord, progressRecord, type LogRecord } from "./ui/LogConsole";
 import { loadSettings, saveSettings, type AppSettings } from "./settings";
-import { IS_MAC, KEY } from "./keys";
+import { ACCEL, IS_MAC, KEY } from "./keys";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Toaster, toast } from "sonner";
 
@@ -2491,9 +2491,25 @@ export function App() {
 
     try {
       const payload = await invoke<{ sql: string }>("sql.format", { sql: activeTab.sql });
+      const editor = editorRef.current;
+      const model = editor?.getModel();
+
+      /*
+       * 用一次可撤销的编辑替换全文，而不是 setValue（setValue 会清空撤销栈，
+       * 格式化后就按不回原来的写法了）。内容变更事件会顺带同步 tab.sql。
+       */
+      if (editor && model) {
+        editor.pushUndoStop();
+        editor.executeEdits("valkyrie.format", [{
+          range: model.getFullModelRange(),
+          text: payload.sql,
+          forceMoveMarkers: true
+        }]);
+        editor.pushUndoStop();
+        return;
+      }
 
       updateTab(activeTab.id, { sql: payload.sql });
-      editorRef.current?.setValue(payload.sql);
     } catch (e) {
       /* 格式化不是语句执行，走系统提示 */
       setError(messageOf(e));
@@ -2617,17 +2633,18 @@ export function App() {
 
     return [
     {
-      label: `运行已选择 (${KEY.run})`,
+      label: "运行已选择",
+      accelerator: ACCEL.run,
       icon: "play",
       disabled: !hasSelection || activeTab.running,
       action: () => void runSelectionOrAll()
     },
     { label: "美化已选择", icon: "code", action: () => void formatActiveQuery() },
     { separator: true },
-    { label: `复制 (${KEY.copy})`, action: () => editorRef.current?.trigger("menu", "editor.action.clipboardCopyAction", null) },
-    { label: `剪切 (${KEY.cut})`, action: () => editorRef.current?.trigger("menu", "editor.action.clipboardCutAction", null) },
-    { label: `粘贴 (${KEY.paste})`, action: () => editorRef.current?.trigger("menu", "editor.action.clipboardPasteAction", null) },
-    { label: `全选 (${KEY.selectAll})`, action: () => editorRef.current?.trigger("menu", "editor.action.selectAll", null) },
+    { label: "复制", accelerator: ACCEL.copy, action: () => editorRef.current?.trigger("menu", "editor.action.clipboardCopyAction", null) },
+    { label: "剪切", accelerator: ACCEL.cut, action: () => editorRef.current?.trigger("menu", "editor.action.clipboardCutAction", null) },
+    { label: "粘贴", accelerator: ACCEL.paste, action: () => editorRef.current?.trigger("menu", "editor.action.clipboardPasteAction", null) },
+    { label: "全选", accelerator: ACCEL.selectAll, action: () => editorRef.current?.trigger("menu", "editor.action.selectAll", null) },
     { separator: true },
     { label: "注释/取消注释", action: () => editorRef.current?.trigger("menu", "editor.action.commentLine", null) },
     { label: "转大写", action: () => editorRef.current?.trigger("menu", "editor.action.transformToUppercase", null) },
@@ -2863,6 +2880,8 @@ export function App() {
     separator?: boolean;
     danger?: boolean;
     disabled?: boolean;
+    /** 快捷键（Electron accelerator 写法），显示在菜单项右侧 */
+    accelerator?: string;
   }
 
   const currentConnection = connections.find(item => item.name === session?.name) ?? null;
@@ -2886,8 +2905,8 @@ export function App() {
         { label: "新建脚本…", disabled: !session, action: () => void createScript() },
         { label: "脚本列表", disabled: !session, action: () => void openScriptList() },
         { separator: true },
-        { label: `保存脚本 (${KEY.save})`, disabled: activeTab?.kind !== "query", action: () => void saveActiveScript() },
-        { label: `脚本另存为… (${KEY.saveAs})`, disabled: activeTab?.kind !== "query", action: () => void saveActiveScript(true) },
+        { label: "保存脚本", accelerator: ACCEL.save, disabled: activeTab?.kind !== "query", action: () => void saveActiveScript() },
+        { label: "脚本另存为…", accelerator: ACCEL.saveAs, disabled: activeTab?.kind !== "query", action: () => void saveActiveScript(true) },
         { separator: true },
         { label: "退出", action: () => windowControl("close") }
       ]
@@ -2895,14 +2914,14 @@ export function App() {
     {
       label: "编辑",
       items: [
-        { label: `格式化 SQL (${KEY.format})`, disabled: activeTab?.kind !== "query", action: () => void formatActiveQuery() },
+        { label: "格式化 SQL", accelerator: ACCEL.format, disabled: activeTab?.kind !== "query", action: () => void formatActiveQuery() },
         { separator: true },
-        { label: `扩展选中 (${KEY.expand})`, disabled: activeTab?.kind !== "query", action: () => editorRef.current?.trigger("menu", "editor.action.smartSelect.expand", null) },
-        { label: `收窄选中 (${KEY.shrink})`, disabled: activeTab?.kind !== "query", action: () => editorRef.current?.trigger("menu", "editor.action.smartSelect.shrink", null) },
+        { label: "扩展选中", accelerator: ACCEL.expand, disabled: activeTab?.kind !== "query", action: () => editorRef.current?.trigger("menu", "editor.action.smartSelect.expand", null) },
+        { label: "收窄选中", accelerator: ACCEL.shrink, disabled: activeTab?.kind !== "query", action: () => editorRef.current?.trigger("menu", "editor.action.smartSelect.shrink", null) },
         { separator: true },
-        { label: `全选 (${KEY.selectAll})`, action: () => selectAllInPage() },
-        { label: "复制", action: () => editorRef.current?.trigger("menu", "editor.action.clipboardCopyAction", null) },
-        { label: "粘贴", action: () => editorRef.current?.trigger("menu", "editor.action.clipboardPasteAction", null) }
+        { label: "全选", accelerator: ACCEL.selectAll, action: () => selectAllInPage() },
+        { label: "复制", accelerator: ACCEL.copy, action: () => editorRef.current?.trigger("menu", "editor.action.clipboardCopyAction", null) },
+        { label: "粘贴", accelerator: ACCEL.paste, action: () => editorRef.current?.trigger("menu", "editor.action.clipboardPasteAction", null) }
       ]
     },
     {
@@ -2937,7 +2956,7 @@ export function App() {
         { label: "新建查询", action: createQueryTab },
         { label: "新建脚本…", disabled: !session, action: () => void createScript() },
         { separator: true },
-        { label: `执行 (${KEY.run})`, disabled: activeTab?.kind !== "query", action: () => void runSelectionOrAll() },
+        { label: "执行", accelerator: ACCEL.run, disabled: activeTab?.kind !== "query", action: () => void runSelectionOrAll() },
         { label: "停止", disabled: !activeTab?.running, action: () => void stopQuery() },
         { label: "执行计划", disabled: activeTab?.kind !== "query", action: () => void explainActiveQuery() }
       ]

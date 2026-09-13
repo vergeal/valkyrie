@@ -1,4 +1,5 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { acceleratorLabel } from "../keys";
 import { Icon } from "./icons";
 import { showMenu, type NativeMenuItem } from "../api";
 import { menuIconDataUrl } from "./menuIcon";
@@ -13,6 +14,11 @@ export interface MenuEntry {
   icon?: string;
   /** 图标颜色，默认中性灰 */
   iconColor?: string;
+  /**
+   * 快捷键（Electron accelerator 写法，如 CmdOrCtrl+R）。
+   * 原生菜单交给系统画在最右侧；应用内下拉菜单用它派生显示文案。
+   */
+  accelerator?: string;
 }
 
 /**
@@ -35,7 +41,8 @@ function renderEntries(
         onSelect={() => entry.action?.()}
       >
         {entry.icon && <Icon name={entry.icon} size={13} className="menu-item-icon" />}
-        {entry.label}
+        <span className="menu-item-label">{entry.label}</span>
+        {entry.accelerator && <span className="menu-item-accel">{acceleratorLabel(entry.accelerator)}</span>}
       </Item>
     ));
 }
@@ -56,6 +63,8 @@ export async function popupNativeMenu(entries: MenuEntry[]) {
       id: String(index),
       label: entry.label ?? "",
       enabled: !entry.disabled,
+      /* 快捷键提示由系统右对齐显示，不注册成全局快捷键 */
+      accelerator: entry.accelerator,
       /* 有图标就先栅格化成 PNG，系统菜单才能显示 */
       icon: entry.icon ? await menuIconDataUrl(entry.icon, entry.iconColor) ?? undefined : undefined
     };

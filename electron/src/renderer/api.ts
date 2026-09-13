@@ -145,6 +145,8 @@ export interface NativeMenuItem {
   label?: string;
   type?: "separator";
   enabled?: boolean;
+  /** 快捷键提示（Electron accelerator 写法），系统会右对齐显示 */
+  accelerator?: string;
   /** PNG data URL（系统菜单只吃位图） */
   icon?: string;
 }

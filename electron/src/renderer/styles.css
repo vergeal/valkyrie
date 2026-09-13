@@ -472,6 +472,22 @@ input, textarea, .console, .pre-wrap { user-select: text; }
   flex: 0 0 auto;
 }
 
+/* 菜单文案占满剩余宽度，快捷键提示统一贴在右边缘（和系统菜单一样） */
+.menu-item .menu-item-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-item .menu-item-accel {
+  flex: 0 0 auto;
+  margin-left: 18px;
+  color: var(--muted);
+  font-size: 11.5px;
+  letter-spacing: .02em;
+}
+
 /* 菜单图标保持自己的语义色，不随悬停变蓝变红（见文件末尾的 .icon-* 规则） */
 
 .menu-item[data-disabled] { color: var(--muted); cursor: default; }

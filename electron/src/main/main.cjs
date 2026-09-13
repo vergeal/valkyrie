@@ -191,6 +191,9 @@ function registerIpc() {
             id: item.id,
             label: item.label,
             enabled: item.enabled !== false,
+            /* 快捷键提示画在菜单右侧；不注册成全局快捷键，避免和编辑器内的键位打架 */
+            accelerator: item.accelerator || undefined,
+            registerAccelerator: false,
             /* 渲染层传过来的是 PNG data URL，转成原生图像 */
             icon: item.icon ? nativeImage.createFromDataURL(item.icon) : undefined,
             click: () => resolve(item.id ?? null)
