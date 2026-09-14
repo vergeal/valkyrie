@@ -2957,3 +2957,45 @@ table.script-list .table-name { min-width: 200px; max-width: 520px; }
   color: var(--muted);
   font-size: 12px;
 }
+
+/* 导出进度弹窗 */
+.export-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 320px;
+  padding: 4px 2px 2px;
+}
+
+.export-progress-track {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--chrome-2);
+}
+
+.export-progress-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width .2s ease;
+}
+
+/* 总表数未知（比如单表导数据）时用不确定动画 */
+.export-progress-track.is-indeterminate .export-progress-fill {
+  width: 35%;
+  animation: export-indeterminate 1.1s ease-in-out infinite;
+}
+
+@keyframes export-indeterminate {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+
+.export-progress-text {
+  color: var(--muted);
+  font-size: 12px;
+}

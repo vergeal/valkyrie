@@ -300,6 +300,11 @@ export function App() {
   const [busy, setBusy] = useState(0);
   /* 正在执行的动作（按钮名），用于给按钮本身加加载态 */
   const [pending, setPending] = useState<string | null>(null);
+  /* 导出进度：后端按表 / 分页上报，进度条弹窗据此显示 */
+  const [exportProgress, setExportProgress] = useState<{
+    token: string; current: number; total: number; totalRows: number; rows: number;
+    table?: string; phase?: string;
+  } | null>(null);
 
   /* 操作反馈：浮层提示（sonner）+ 状态栏转圈，让用户知道动作确实执行了 */
   function flash(text: string) {
@@ -435,6 +440,8 @@ export function App() {
    * 让并发调用最终都写到同一个标签上。
    */
   const objectTabIdRef = useRef<string | null>(null);
+  /* 当前这次导出的 token：只接受与它匹配的进度事件，避免多次导出串台 */
+  const exportTokenRef = useRef<string | null>(null);
   /* macOS 系统菜单栏：菜单项 id → 动作（每次渲染刷新，主进程点中后按 id 回调） */
   const appMenuActionsRef = useRef<Record<string, () => void>>({});
 
@@ -449,6 +456,26 @@ export function App() {
     void refreshConnections();
 
     return onEvent((event: ProgressEvent) => {
+      if (event.channel === "export.progress") {
+        const progress = event as ProgressEvent & {
+          token?: string; current?: number; total?: number; totalRows?: number;
+          table?: string; rows?: number; phase?: string;
+        };
+
+        if (progress.token && progress.token === exportTokenRef.current)
+          setExportProgress({
+            token: progress.token,
+            current: progress.current ?? 0,
+            total: progress.total ?? 0,
+            totalRows: progress.totalRows ?? 0,
+            table: progress.table,
+            rows: progress.rows ?? 0,
+            phase: progress.phase
+          });
+
+        return;
+      }
+
       if (event.channel !== "query.progress")
         return;
 
@@ -579,6 +606,15 @@ export function App() {
       /* 滚动条收细，和界面其它区域保持一致 */
       scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10, useShadows: false },
       renderLineHighlight: "line",
+      /*
+       * 关掉 Unicode 高亮检测：默认会把非 ASCII（中文、全角标点等）用黄色框标出来，
+       * SQL 里写中文注释/字符串很正常，不需要这种提示。
+       */
+      unicodeHighlight: {
+        nonBasicASCII: false,
+        ambiguousCharacters: false,
+        invisibleCharacters: false
+      },
       /* 右键菜单换成 FX 版那套（自己接管），关掉 Monaco 内置的 */
       contextmenu: false,
       /* 补全走 Monaco 内置弹窗；候选由下面注册的 Provider 提供 */
@@ -2665,6 +2701,86 @@ export function App() {
     }
   }
 
+  /** 导出单张表：结构，或结构 + 数据（写成一份 .sql） */
+  async function exportTableSql(node: SchemaNode, withData: boolean) {
+    const target = sessionOfNode(node);
+
+    if (!target)
+      return;
+
+    const path = await chooseSavePath({
+      title: withData ? "导出表结构和数据" : "导出表结构",
+      defaultPath: `${node.label}.sql`,
+      filters: [{ name: "SQL 文件", extensions: ["sql"] }]
+    });
+
+    if (!path)
+      return;
+
+    const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    exportTokenRef.current = token;
+    setExportProgress({ token, current: 0, total: 0, totalRows: 0, table: node.label, rows: 0, phase: "count" });
+
+    try {
+      const payload = await invoke<{ tables: number; rows: number }>("table.export", {
+        ...tableParams(target.sessionId, node),
+        path,
+        withData,
+        token
+      });
+
+      setStatus(withData
+        ? `已导出 ${node.label}（${payload.rows} 行）到 ${path}`
+        : `已导出 ${node.label} 表结构到 ${path}`);
+    } catch (e) {
+      setError(messageOf(e));
+    } finally {
+      exportTokenRef.current = null;
+      setExportProgress(null);
+    }
+  }
+
+  /** 导出整个数据库 / 模式下所有表：结构，或结构 + 数据 */
+  async function exportDatabaseSql(node: SchemaNode, withData: boolean) {
+    const target = sessionOfNode(node);
+
+    if (!target)
+      return;
+
+    const path = await chooseSavePath({
+      title: withData ? "导出数据库结构和数据" : "导出数据库结构",
+      defaultPath: `${node.label}.sql`,
+      filters: [{ name: "SQL 文件", extensions: ["sql"] }]
+    });
+
+    if (!path)
+      return;
+
+    const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    exportTokenRef.current = token;
+    setExportProgress({ token, current: 0, total: 0, totalRows: 0, table: node.label, rows: 0, phase: "count" });
+
+    try {
+      const payload = await invoke<{ tables: number; rows: number }>("database.export", {
+        sessionId: target.sessionId,
+        catalog: node.catalog ?? (node.kind === "CATALOG" ? node.label : undefined),
+        schema: node.schema ?? (node.kind === "SCHEMA" ? node.label : undefined),
+        path,
+        withData,
+        token
+      });
+
+      setStatus(withData
+        ? `已导出 ${payload.tables} 张表（${payload.rows} 行）到 ${path}`
+        : `已导出 ${payload.tables} 张表的结构到 ${path}`);
+    } catch (e) {
+      setError(messageOf(e));
+    } finally {
+      exportTokenRef.current = null;
+      setExportProgress(null);
+    }
+  }
+
   /**
    * 关闭某个连接（不传就是当前活动的那个）。
    * 多连接并存：只清掉这个连接的会话、根节点与它的数据页 / 设计页 / 对象页，
@@ -3081,6 +3197,9 @@ export function App() {
         { label: "新建表…", action: () => void createTableDraft(node.label) },
         { label: "新建查询", action: createQueryTab },
         { separator: true },
+        { label: "导出表结构", action: () => void exportDatabaseSql(node, false) },
+        { label: "导出表结构和数据", action: () => void exportDatabaseSql(node, true) },
+        { separator: true },
         { label: "刷新", action: () => void refreshObjectList(node) },
         { label: "复制名称", action: () => void copyText(node.label) }
       ];
@@ -3092,6 +3211,9 @@ export function App() {
         { label: "表列表", action: () => void openTableList(node) },
         { label: "新建表…", action: () => void createTableDraft(node.label) },
         { label: "新建查询", action: createQueryTab },
+        { separator: true },
+        { label: "导出表结构", action: () => void exportDatabaseSql(node, false) },
+        { label: "导出表结构和数据", action: () => void exportDatabaseSql(node, true) },
         { separator: true },
         { label: "刷新列表", action: () => void refreshObjectList(node) },
         { label: "复制名称", action: () => void copyText(node.label) }
@@ -3143,6 +3265,9 @@ export function App() {
         { label: "复制表名", action: () => void copyText(node.label) },
         { label: "复制建表语句", action: () => void copyDdl(node) },
         { label: "复制查询语句", action: () => void copyText(`SELECT * FROM ${node.label};`) },
+        { separator: true },
+        { label: "导出表结构", action: () => void exportTableSql(node, false) },
+        { label: "导出表结构和数据", action: () => void exportTableSql(node, true) },
         { separator: true },
         { label: "清空表", danger: true, action: () => void clearTable(node) },
         { label: "删除表", danger: true, action: () => void dropTable(node) },
@@ -4166,6 +4291,20 @@ export function App() {
   /* 当前标签在对象树里对应的节点（有才给「定位」按钮） */
   const locatableNode = treeNodeOfTab(activeTab);
 
+  /* 导出进度百分比：按真实行数走；总行数未知时退回表数；都未知则 null（走不确定动画） */
+  const exportPercent = (() => {
+    if (!exportProgress || exportProgress.phase !== "dump")
+      return null;
+
+    if (exportProgress.totalRows > 0)
+      return Math.min(100, Math.round((exportProgress.rows / exportProgress.totalRows) * 100));
+
+    if (exportProgress.total > 0)
+      return Math.min(100, Math.round((exportProgress.current / exportProgress.total) * 100));
+
+    return null;
+  })();
+
   return (
     <div className={`app${settings.gridZebra ? "" : " no-zebra"}${settings.gridRowNumbers ? "" : " no-rownum"}${IS_MAC ? " is-mac" : ""}${themeResolved === "dark" ? " is-dark" : " is-light"}`}>
       <header className="titlebar">
@@ -5091,6 +5230,29 @@ export function App() {
           onThemeChange={setTheme}
           onClose={() => setOptionsOpen(false)}
         />
+      )}
+
+      {exportProgress && (
+        <Dialog
+          title={<><Icon name="download" size={14} />正在导出</>}
+          className="export-progress-dialog"
+          role="alertdialog"
+        >
+          <div className="export-progress">
+            <div className={`export-progress-track${exportPercent === null ? " is-indeterminate" : ""}`}>
+              <span
+                className="export-progress-fill"
+                style={exportPercent === null ? undefined : { width: `${exportPercent}%` }}
+              />
+            </div>
+            <div className="export-progress-text">
+              {exportProgress.phase === "count"
+                ? `正在统计行数${exportProgress.table ? `（${exportProgress.table}）` : ""}…`
+                : `已完成 ${exportProgress.current} / ${exportProgress.total} 张表 · 已写入 ${exportProgress.rows} 行`
+                  + (exportProgress.totalRows > 0 ? ` / ${exportProgress.totalRows}` : "")}
+            </div>
+          </div>
+        </Dialog>
       )}
 
       {messageBox && (

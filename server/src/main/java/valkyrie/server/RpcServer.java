@@ -14,6 +14,7 @@ import valkyrie.core.repository.QueryFileRepository;
 import valkyrie.driver.api.Column;
 import valkyrie.driver.api.ConnectionConfig;
 import valkyrie.driver.api.DbType;
+import valkyrie.driver.api.Dialect;
 import valkyrie.driver.api.Driver;
 import valkyrie.driver.api.DriverFactory;
 import valkyrie.driver.api.GridRow;
@@ -39,6 +40,10 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
+import java.util.Set;
 
 import java.io.PrintStream;
 import java.util.ArrayList;
@@ -151,6 +156,8 @@ public class RpcServer
                         case "table.indexes" -> tableIndexes(params);
                         case "table.ddl" -> tableDdl(params);
                         case "table.design" -> designTable(params);
+                        case "table.export" -> exportTableSql(params);
+                        case "database.export" -> exportDatabaseSql(params);
                         case "sql.format" -> formatSql(params);
                         case "sql.suggest" -> suggestSql(params);
                         case "sql.warmSuggest" -> warmSuggest(params);
@@ -471,6 +478,249 @@ public class RpcServer
                 ret.put("ddl", session.driver.showCreateTable(context, params.getString("table")));
 
                 return ret;
+        }
+
+        /**
+         * 导出单张表：结构（CREATE TABLE），可选连同数据（INSERT）。
+         */
+        private Object exportTableSql(JSONObject params)
+        {
+                OpenConnection session = require(params.getString("sessionId"));
+                Session context = Session.of(params.getString("catalog"), params.getString("schema"));
+                String table = params.getString("table");
+
+                if (table == null || table.isBlank())
+                        throw new IllegalArgumentException("表名不能为空");
+
+                return writeSqlDump(session.driver, context, List.of(table), params.getString("path"),
+                        params.getBooleanValue("withData"), params.getString("token"));
+        }
+
+        /**
+         * 导出整个数据库 / 模式下所有表：结构（CREATE TABLE），可选连同数据（INSERT）。
+         */
+        private Object exportDatabaseSql(JSONObject params)
+        {
+                OpenConnection session = require(params.getString("sessionId"));
+                Session context = Session.of(params.getString("catalog"), params.getString("schema"));
+
+                List<String> tables = new ArrayList<>();
+
+                for (Table table : session.driver.getTables(context))
+                        tables.add(table.getName());
+
+                return writeSqlDump(session.driver, context, tables, params.getString("path"),
+                        params.getBooleanValue("withData"), params.getString("token"));
+        }
+
+        /**
+         * 导出进度：渲染层据此画进度条弹窗。
+         * phase=count 表示还在统计总行数（此时进度条走不确定动画）；
+         * phase=dump 时用 rows / totalRows 算百分比，totalRows 为 0 则退回按表数。
+         */
+        private void exportProgress(String token, int current, int total, String table,
+                long rows, long totalRows, String phase)
+        {
+                if (token == null || token.isBlank())
+                        return;
+
+                JSONObject payload = new JSONObject();
+                payload.put("token", token);
+                payload.put("current", current);
+                payload.put("total", total);
+                payload.put("table", table);
+                payload.put("rows", rows);
+                payload.put("totalRows", totalRows);
+                payload.put("phase", phase);
+                notify("export.progress", payload);
+        }
+
+        /** 每页读取的行数：导出数据时分页把结果拼成 INSERT，避免一次性把所有行读进内存 */
+        private static final int DUMP_PAGE_SIZE = 1000;
+
+        private static final Set<String> NUMERIC_TYPES = Set.of(
+                "INT", "INTEGER", "TINYINT", "SMALLINT", "MEDIUMINT", "BIGINT",
+                "DECIMAL", "DEC", "NUMERIC", "NUMBER", "FLOAT", "DOUBLE", "REAL",
+                "MONEY", "SMALLMONEY", "SERIAL", "BIGSERIAL", "BINARY_FLOAT", "BINARY_DOUBLE"
+        );
+
+        /** 把若干张表写成一份 SQL 脚本（结构 + 可选数据），返回写入的数据行数 */
+        private JSONObject writeSqlDump(Driver driver, Session context, List<String> tables,
+                String path, boolean withData, String token)
+        {
+                if (path == null || path.isBlank())
+                        throw new IllegalArgumentException("导出路径不能为空");
+
+                Dialect dialect = driver.getDialect();
+                StringBuilder builder = new StringBuilder();
+                int rowCount = 0;
+                int total = tables.size();
+
+                /* 先数一遍行数，进度条才是按真实行数走的（不数就只能按表数走，单表会看着像假的） */
+                long totalRows = 0;
+
+                if (withData) {
+                        for (int index = 0; index < tables.size(); index++) {
+                                String table = tables.get(index);
+
+                                exportProgress(token, index, total, table, 0, 0, "count");
+                                totalRows += countRows(driver, dialect, context, table);
+                        }
+                }
+
+                exportProgress(token, 0, total, null, 0, totalRows, "dump");
+
+                builder.append("-- Valkyrie SQL dump\n");
+                builder.append("-- 数据库: ").append(context.catalog() == null ? "" : context.catalog());
+
+                if (context.schema() != null)
+                        builder.append("  模式: ").append(context.schema());
+
+                builder.append("\n-- 时间: ")
+                        .append(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now()))
+                        .append("\n\n");
+
+                for (int index = 0; index < tables.size(); index++) {
+                        String table = tables.get(index);
+
+                        exportProgress(token, index, total, table, rowCount, totalRows, "dump");
+
+                        builder.append("-- ----------------------------\n");
+                        builder.append("-- 表结构: ").append(table).append("\n");
+                        builder.append("-- ----------------------------\n");
+
+                        String ddl = driver.showCreateTable(context, table).trim();
+
+                        builder.append(ddl);
+                        if (!ddl.endsWith(";"))
+                                builder.append(';');
+
+                        builder.append("\n\n");
+
+                        if (withData) {
+                                builder.append("-- 表数据: ").append(table).append("\n");
+
+                                List<Column> columns = null;
+                                int offset = 0;
+
+                                while (true) {
+                                        QueryResult result = driver.selectByPage(context, table, offset, DUMP_PAGE_SIZE);
+                                        List<GridRow> rows = result.getRows();
+
+                                        if (columns == null)
+                                                columns = result.getColumns();
+
+                                        for (GridRow row : rows) {
+                                                builder.append(dumpInsert(dialect, table, columns, row)).append('\n');
+                                                rowCount++;
+                                        }
+
+                                        exportProgress(token, index, total, table, rowCount, totalRows, "dump");
+
+                                        if (rows.size() < DUMP_PAGE_SIZE)
+                                                break;
+
+                                        offset += rows.size();
+                                }
+
+                                builder.append('\n');
+                        }
+
+                        exportProgress(token, index + 1, total, table, rowCount, totalRows, "dump");
+                }
+
+                /* 收尾：行数可能因精确统计而有出入，明确报一次进度，进度条才会走到 100% */
+                exportProgress(token, total, total, null, rowCount, Math.max(totalRows, rowCount), "dump");
+
+                try {
+                        Files.writeString(Path.of(path), builder, StandardCharsets.UTF_8);
+                } catch (Exception e) {
+                        throw new CoreException(e);
+                }
+
+                JSONObject ret = new JSONObject();
+                ret.put("path", path);
+                ret.put("tables", tables.size());
+                ret.put("rows", rowCount);
+
+                return ret;
+        }
+
+        /** 统计表行数用于进度条分母；失败返回 0（不影响导出，只是该表不参与百分比） */
+        private long countRows(Driver driver, Dialect dialect, Session context, String table)
+        {
+                try {
+                        QueryResult result = driver.execute(context,
+                                new SQL("SELECT COUNT(*) FROM " + dialect.quote(table)));
+                        List<GridRow> rows = result.getRows();
+
+                        if (!rows.isEmpty() && !rows.getFirst().isEmpty()) {
+                                String value = rows.getFirst().get(0);
+
+                                if (value != null && !value.isBlank())
+                                        return Long.parseLong(value.trim());
+                        }
+                } catch (Exception e) {
+                        LOG.debug("统计表 {} 行数失败，导出进度将不包含该表", table, e);
+                }
+
+                return 0;
+        }
+
+        private String dumpInsert(Dialect dialect, String table, List<Column> columns, GridRow row)
+        {
+                StringBuilder builder = new StringBuilder("INSERT INTO ")
+                        .append(dialect.quote(table))
+                        .append(" (");
+
+                for (int i = 0; i < columns.size(); i++) {
+                        if (i > 0)
+                                builder.append(", ");
+
+                        builder.append(dialect.quote(columns.get(i).getName()));
+                }
+
+                builder.append(") VALUES (");
+
+                for (int i = 0; i < columns.size(); i++) {
+                        if (i > 0)
+                                builder.append(", ");
+
+                        builder.append(dumpLiteral(i < row.size() ? row.get(i) : null, columns.get(i).getType()));
+                }
+
+                return builder.append(");").toString();
+        }
+
+        /** 单元格文本 → SQL 字面量：数值 / 布尔裸写，其余单引号转义 */
+        private String dumpLiteral(String value, String type)
+        {
+                if (value == null)
+                        return "NULL";
+
+                String upper = type == null ? "" : type.toUpperCase(Locale.ROOT);
+
+                if (isNumericType(upper) && value.matches("-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?"))
+                        return value;
+
+                if (upper.contains("BOOL")) {
+                        if (value.equalsIgnoreCase("true") || value.equalsIgnoreCase("t") || value.equals("1"))
+                                return "TRUE";
+
+                        if (value.equalsIgnoreCase("false") || value.equalsIgnoreCase("f") || value.equals("0"))
+                                return "FALSE";
+                }
+
+                return "'" + value.replace("'", "''") + "'";
+        }
+
+        private boolean isNumericType(String type)
+        {
+                for (String token : type.split("[^A-Za-z0-9_]+"))
+                        if (NUMERIC_TYPES.contains(token))
+                                return true;
+
+                return false;
         }
 
         /**
