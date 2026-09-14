@@ -35,6 +35,8 @@ export interface ScriptFile {
   path: string;
   /** 所属数据库目录 */
   catalog: string;
+  /** 所属连接（列表接口逐条补齐，用于按连接打开） */
+  connection?: string;
   size: number;
   modified: number;
 }
@@ -171,9 +173,15 @@ declare global {
       showMessage?: (options: MessageOptions) => Promise<number>;
       showMenu?: (options: { items: NativeMenuItem[] }) => Promise<string | null>;
       setNativeTheme?: (theme: string) => Promise<boolean>;
+      /** macOS 系统菜单栏：整份菜单同步到主进程 */
+      setAppMenu?: (items: NativeMenuItem[]) => Promise<boolean>;
+      /** 系统菜单栏被点中的项（回传菜单项 id） */
+      onAppMenu?: (callback: (id: string) => void) => () => void;
       /** 客户端设置：主进程负责写 userData/settings.json */
       loadSettings?: () => Promise<Record<string, unknown>>;
       saveSettings?: (settings: Record<string, unknown>) => Promise<boolean>;
+      /** 本机字体族列表 */
+      listFonts?: () => Promise<string[]>;
     };
   }
 }
@@ -238,6 +246,16 @@ export function setNativeTheme(theme: string): Promise<boolean> {
   return window.valkyrie?.setNativeTheme?.(theme) ?? Promise.resolve(false);
 }
 
+/** macOS 系统菜单栏：把整份菜单同步到主进程（窗口内不再自绘菜单栏） */
+export function setAppMenu(items: NativeMenuItem[]): Promise<boolean> {
+  return window.valkyrie?.setAppMenu?.(items) ?? Promise.resolve(false);
+}
+
+/** 订阅系统菜单栏被点中的项（回传菜单项 id） */
+export function onAppMenu(callback: (id: string) => void): () => void {
+  return window.valkyrie?.onAppMenu?.(callback) ?? (() => undefined);
+}
+
 /** 从主进程读客户端设置（userData/settings.json） */
 export function loadSettingsFile(): Promise<Record<string, unknown>> {
   return window.valkyrie?.loadSettings?.() ?? Promise.resolve({});
@@ -246,6 +264,11 @@ export function loadSettingsFile(): Promise<Record<string, unknown>> {
 /** 把客户端设置写回主进程的配置文件 */
 export function saveSettingsFile(settings: Record<string, unknown>): Promise<boolean> {
   return window.valkyrie?.saveSettings?.(settings) ?? Promise.resolve(false);
+}
+
+/** 枚举本机字体族（由主进程用各平台系统接口拿，Chromium 未暴露 Local Font Access） */
+export function listFonts(): Promise<string[]> {
+  return window.valkyrie?.listFonts?.() ?? Promise.resolve([]);
 }
 
 export function messageOf(error: unknown): string {

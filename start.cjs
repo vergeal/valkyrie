@@ -5,7 +5,7 @@
  * Valkyrie 一键启动：依赖 → 数据层 → 渲染层 → 客户端窗口。
  *
  *   start.cmd             Windows（双击或命令行）
- *   ./start.sh            macOS / Linux
+ *   ./start            macOS / Linux
  *   node start.cjs        任意平台
  *
  * 数据层只有在缺失或源码比产物新时才会重新构建，日常改前端界面无需等 Maven。

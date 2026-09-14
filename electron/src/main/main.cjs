@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeTheme, nativeImage } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
+const { execFile } = require("node:child_process");
 const { JavaBridge } = require("./java-bridge.cjs");
 const { createSplash } = require("./splash.cjs");
 const { registerWindowControls, attachWindowState, disableBrowserShortcuts } = require("./window-controls.cjs");
@@ -34,12 +35,94 @@ function appIconPath() {
   return path.join(__dirname, "..", "..", "assets", "icon.png");
 }
 
+/* ********************************************************************* */
+/*                            本机字体枚举                                */
+/* ********************************************************************* */
+
+/** 跑一个外部命令取输出（失败返回空串，不抛异常） */
+function runCommand(command, args) {
+  return new Promise(resolve => {
+    execFile(command, args, { maxBuffer: 16 * 1024 * 1024, timeout: 20000 }, (error, stdout, stderr) => {
+      if (error) {
+        resolve("");
+        return;
+      }
+
+      /* osascript(JXA) 的 console.log 走 stderr，这里两边都兜一下 */
+      const out = String(stdout || "").trim() || String(stderr || "").trim();
+      resolve(out);
+    });
+  });
+}
+
+function uniqueSorted(lines) {
+  const families = new Set();
+
+  for (const line of lines) {
+    const name = String(line).trim();
+
+    if (name)
+      families.add(name);
+  }
+
+  return [...families].sort((a, b) => a.localeCompare(b));
+}
+
+/** macOS：走 AppKit 的可用字体族（比 system_profiler 快得多）；console.log 输出到 stderr，用 JSON 收口 */
+const MAC_FONT_SCRIPT = [
+  'ObjC.import("AppKit");',
+  "console.log(JSON.stringify(ObjC.deepUnwrap($.NSFontManager.sharedFontManager.availableFontFamilies)));"
+].join("\n");
+
+/** Windows：System.Drawing 的已安装字体集合（先把输出编码固定成 UTF-8，避免中文名乱码） */
+const WIN_FONT_SCRIPT = [
+  "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;",
+  "Add-Type -AssemblyName System.Drawing;",
+  "(New-Object System.Drawing.Text.InstalledFontCollection).Families | ForEach-Object { $_.Name }"
+].join(" ");
+
+/** 枚举本机字体族（按平台选最快的系统方式），结果进程内缓存 */
+let fontFamiliesCache = null;
+
+async function listSystemFontFamilies() {
+  if (fontFamiliesCache)
+    return fontFamiliesCache;
+
+  let families = [];
+
+  try {
+    if (process.platform === "darwin") {
+      const raw = await runCommand("/usr/bin/osascript", ["-l", "JavaScript", "-e", MAC_FONT_SCRIPT]);
+      let names = [];
+
+      try {
+        names = JSON.parse(raw);
+      } catch {
+        names = raw.split(/\r?\n/);
+      }
+
+      families = uniqueSorted(Array.isArray(names) ? names : []);
+    } else if (process.platform === "win32") {
+      families = uniqueSorted((await runCommand("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WIN_FONT_SCRIPT])).split(/\r?\n/));
+    } else {
+      const out = await runCommand("fc-list", [":", "family"]);
+      families = uniqueSorted(out.split(/\r?\n/).flatMap(line => line.split(",")).map(part => part.trim()));
+    }
+  } catch {
+    families = [];
+  }
+
+  if (families.length > 0)
+    fontFamiliesCache = families;
+
+  return families;
+}
+
 /**
  * 菜单栏：Windows / Linux 不需要浏览器默认菜单（里面的刷新、开发者工具等快捷键一并去掉），
  * macOS 则必须保留一份，否则 ⌘Q、⌘H 以及输入框里的 ⌘C / ⌘V 都会失效。
  * ⌘A 不注册成 selectAll role，改为转发给渲染层 —— 对象页 / 脚本页要全选表格里的行。
- */
-function installApplicationMenu() {
+ */function installApplicationMenu() {
   if (process.platform !== "darwin") {
     Menu.setApplicationMenu(null);
     return;
@@ -124,6 +207,18 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false
     }
+  });
+
+  /*
+   * 权限：渲染层粘贴 / 写剪贴板要用 clipboard-*，其余权限不放开。
+   * （字体枚举不走浏览器权限，改由主进程的系统接口拿，见 listSystemFontFamilies）
+   */
+  const allowedPermissions = new Set(["clipboard-read", "clipboard-sanitized-write"]);
+  const windowSession = mainWindow.webContents.session;
+
+  windowSession.setPermissionCheckHandler((_contents, permission) => allowedPermissions.has(permission));
+  windowSession.setPermissionRequestHandler((_contents, permission, callback) => {
+    callback(allowedPermissions.has(permission));
   });
 
   /* 默认以最大化打开（先最大化再显示，避免先闪一下小窗口） */
@@ -319,6 +414,73 @@ function registerIpc() {
   ipcMain.handle("valkyrie:set-native-theme", async (_event, theme) => {
     nativeTheme.themeSource = theme === "dark" || theme === "light" ? theme : "system";
     return nativeTheme.shouldUseDarkColors;
+  });
+
+  /* 本机字体：选项里的字体下拉用 */
+  ipcMain.handle("valkyrie:list-fonts", async () => listSystemFontFamilies());
+
+  /*
+   * macOS 系统菜单栏：渲染层把整份菜单（文件 / 视图 / 数据库 …）发过来，
+   * 这里用同一套动作 id 重建原生菜单；点击后把项 id 回传渲染层执行。
+   * 非 macOS 不做处理，窗口内继续用自绘菜单栏。
+   */
+  ipcMain.handle("valkyrie:set-app-menu", (event, items) => {
+    if (process.platform !== "darwin")
+      return false;
+
+    const sender = event.sender;
+
+    /* 标准编辑动作必须用系统 role：否则输入框里的 ⌘Z / ⌘X 会失效 */
+    const editRoles = [
+      { role: "undo" },
+      { role: "redo" },
+      { type: "separator" },
+      { role: "cut" },
+      { type: "separator" }
+    ];
+
+    const toItem = item => {
+      if (!item || item.type === "separator")
+        return { type: "separator" };
+
+      const hasSubmenu = Boolean(item.submenu && item.submenu.length);
+
+      return {
+        label: item.label ?? "",
+        enabled: item.enabled !== false,
+        /* 快捷键由系统注册：⌘C / ⌘A 等会先被菜单吃掉再转发，行为与以前一致 */
+        accelerator: item.accelerator || undefined,
+        submenu: hasSubmenu ? item.submenu.map(toItem) : undefined,
+        click: hasSubmenu ? undefined : () => {
+          if (!sender.isDestroyed())
+            sender.send("valkyrie:app-menu", item.id);
+        }
+      };
+    };
+
+    const template = [
+      { role: "appMenu" },
+      ...(items || []).map(menu => ({
+        label: menu.label,
+        submenu: [
+          ...(menu.label === "编辑" ? editRoles : []),
+          ...(menu.submenu || []).map(toItem)
+        ]
+      })),
+      /* 自己列窗口菜单，避免默认模板里带 ⌘W 关闭窗口（那个键留给编辑器的智能扩选） */
+      {
+        label: "窗口",
+        submenu: [
+          { role: "minimize" },
+          { role: "zoom" },
+          { type: "separator" },
+          { role: "front" }
+        ]
+      }
+    ];
+
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+    return true;
   });
 }
 

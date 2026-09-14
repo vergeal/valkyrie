@@ -23,6 +23,7 @@ export const ACCEL = {
   copy: "CmdOrCtrl+C",
   cut: "CmdOrCtrl+X",
   paste: "CmdOrCtrl+V",
+  options: "CmdOrCtrl+,",
   space: "CmdOrCtrl+Space"
 };
 

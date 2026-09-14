@@ -70,10 +70,23 @@
   --scroll-thumb-hover: light-dark(rgba(15, 23, 42, .36), rgba(230, 237, 243, .34));
   --mono: Consolas, "Cascadia Mono", "Courier New", monospace;
 
-  font-family: "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  /* 界面字体分平台：Windows 用 Segoe UI，macOS 用系统字体（见 html.is-mac 覆盖） */
+  --font: "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+
+  font-family: var(--font);
   /* 界面字号可在「工具 → 选项」里调整 */
   font-size: var(--ui-font-size, 14px);
   line-height: 1.45;
+}
+
+/*
+ * macOS：默认字体应是系统字体 —— 正文 San Francisco（system-ui 即 SF），
+ * 中文走苹方，等宽走 SF Mono / Menlo；Segoe UI / Microsoft YaHei 是 Windows 的字体，
+ * 在 mac 上要么没有、要么（装了 Office 时）字形不对。
+ */
+html.is-mac {
+  --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", system-ui, sans-serif;
+  --mono: "SF Mono", Menlo, Monaco, "Cascadia Mono", Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -91,6 +104,20 @@ body {
 button { font: inherit; color: inherit; }
 input { font: inherit; color: inherit; }
 input, textarea, .console, .pre-wrap { user-select: text; }
+
+/*
+ * 焦点环：浏览器默认用系统强调色画（macOS 上可能是黄色），这里统一成主题色，
+ * 免得菜单栏、下拉、按钮在键盘聚焦时冒出一圈突兀的黄色边框。
+ * 用 :focus-visible，鼠标点击不会亮，只有键盘导航 / Tab 才显示。
+ */
+.app button:focus-visible,
+.app a:focus-visible,
+.app [role="menuitem"]:focus-visible,
+.app [role="option"]:focus-visible,
+.app [role="tab"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 /*
  * 细滚动条：Chromium 在 Windows 上默认的滚动条有 15px 还带箭头，放在数据区里太抢眼。
@@ -985,7 +1012,7 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
   border-radius: 6px;
   background: var(--field);
   color: var(--text);
-  font-family: var(--mono);
+  font-family: var(--grid-font, var(--mono));
   font-size: var(--grid-font-size, 14px);
   line-height: 1.45;
   /* 缩放交给外层气泡，输入框跟着一起变大 */
@@ -994,6 +1021,71 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
 }
 
 .cell-bubble-input:focus { border-color: var(--accent); }
+
+/*
+ * JSON 高亮编辑：透明文字的 textarea 浮在渲染好的 <pre> 上，
+ * 两层的字体 / 内边距 / 行高必须完全一致，才能逐字对齐。
+ */
+.json-edit {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+}
+
+.json-edit-highlight,
+.json-edit-input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-family: var(--grid-font, var(--mono));
+  font-size: var(--grid-font-size, 14px);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  tab-size: 4;
+}
+
+.json-edit-highlight {
+  display: none;
+  overflow: hidden;
+  background: var(--field);
+  color: var(--text);
+  pointer-events: none;
+}
+
+.json-edit.is-json .json-edit-highlight { display: block; }
+
+.json-edit-input {
+  overflow: auto;
+  background: var(--field);
+  color: var(--text);
+  resize: none;
+  outline: none;
+}
+
+/* 命中 JSON：输入框文字透明，只留光标；颜色交给下层高亮层 */
+.json-edit.is-json .json-edit-input {
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+}
+
+.json-edit-input:focus { border-color: var(--accent); }
+.json-edit.is-json .json-edit-input::selection {
+  background: light-dark(rgba(47, 111, 235, .22), rgba(88, 166, 255, .32));
+}
+
+/* JSON token 配色，跟随明暗主题 */
+.json-edit-highlight .tok-key { color: light-dark(#0550ae, #79c0ff); }
+.json-edit-highlight .tok-string { color: light-dark(#0a7d33, #7ee787); }
+.json-edit-highlight .tok-number { color: light-dark(#953800, #ffa657); }
+.json-edit-highlight .tok-literal { color: light-dark(#8250df, #d2a8ff); }
+.json-edit-highlight .tok-punct { color: var(--muted); }
 
 /*
  * 自绘日期时间选择器：原生 `<input type="date">` 的分段编辑与系统日历面板
@@ -1616,7 +1708,7 @@ table.grid {
    * 字号 14px 配 1.3 行高 + 上下 2px 内边距 → 行高约 22px，比"12px + 7px 内边距"更耐看也更紧凑。
    * 数据用等宽字体（Navicat 也是等宽）：数字/编码对齐，眼睛不容易累。
    */
-  font-family: var(--mono);
+  font-family: var(--grid-font, var(--mono));
   font-size: var(--grid-font-size, 14px);
   line-height: 1.3;
   font-variant-numeric: tabular-nums;
@@ -1745,7 +1837,8 @@ table.table-list.is-refreshing {
 table.table-list {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-family: var(--grid-font, var(--mono));
+  font-size: var(--grid-font-size, 14px);
   font-variant-numeric: tabular-nums;
   user-select: none;
   /* Navicat 风格：列表而非网格 —— 没有边框线、没有斑马纹 */
@@ -2769,3 +2862,98 @@ table.script-list .table-name { min-width: 200px; max-width: 520px; }
 }
 
 .options-actions { border-top: 1px solid var(--line-soft); }
+
+/* 字号：不限档位，用户自己输入的number输入框 */
+.opt-number-input {
+  width: 76px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  text-align: right;
+}
+
+.opt-number-input:focus { outline: none; border-color: var(--accent); }
+
+/*
+ * 字体选择器：本机字体可能有几百个，普通下拉不好找，
+ * 用带搜索框的下拉，并让每一项用自身字体预览。
+ */
+.vk-font-select-menu {
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  padding: 4px;
+  background: var(--overlay);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 16px 40px light-dark(rgba(15, 23, 42, .18), rgba(1, 4, 9, .65));
+}
+
+.vk-font-select-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 6px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--muted);
+}
+
+.vk-font-select-search input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.vk-font-select-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 300px;
+  padding-top: 4px;
+  overflow: auto;
+}
+
+.vk-font-select-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vk-font-select-item:hover { background: var(--hover); }
+.vk-font-select-item.is-active { color: var(--accent); }
+
+.vk-font-select-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vk-font-select-empty {
+  padding: 10px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}

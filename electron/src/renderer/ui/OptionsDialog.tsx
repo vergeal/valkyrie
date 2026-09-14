@@ -1,19 +1,23 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Dialog } from "./Dialog";
 import { Icon } from "./icons";
+import { FontSelect } from "./FontSelect";
+import { NumberField } from "./NumberField";
 import { Select } from "./Select";
 import {
   DEFAULT_SETTINGS,
-  EDITOR_FONT_OPTIONS,
-  FONT_SIZE_OPTIONS,
-  GRID_FONT_SIZE_OPTIONS,
+  FALLBACK_FONT_FAMILIES,
   LOG_LIMIT_OPTIONS,
   PAGE_SIZE_OPTIONS,
+  SYSTEM_FONT,
   TAB_SIZE_OPTIONS,
-  UI_FONT_SIZE_OPTIONS,
+  listSystemFonts,
   type AppSettings,
+  type FontKind,
+  type FontOption,
   type ThemeMode
 } from "../settings";
+import { IS_MAC } from "../keys";
 
 interface OptionsDialogProps {
   settings: AppSettings;
@@ -51,6 +55,49 @@ export function OptionsDialog(props: OptionsDialogProps) {
   const { settings, theme, onChange, onThemeChange, onClose } = props;
   const [active, setActive] = useState("appearance");
   const [keyword, setKeyword] = useState("");
+  const [systemFonts, setSystemFonts] = useState<string[]>([]);
+
+  /* 枚举本机字体：列表里给出系统里的所有字体供选择 */
+  useEffect(() => {
+    let alive = true;
+
+    void listSystemFonts().then(fonts => {
+      if (alive)
+        setSystemFonts(fonts);
+    });
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  /**
+   * 字体下拉：系统默认 + 本机已装字体 + 常见编程字体兜底 + 当前值
+   * （当前值可能已不在系统里，仍要能显示出来）。
+   */
+  function fontFamilyOptions(kind: FontKind, current: string): FontOption[] {
+    const systemLabel = kind === "ui"
+      ? "系统默认"
+      : IS_MAC
+        ? (kind === "editor" ? "系统默认（Monaco）" : "系统默认（Menlo）")
+        : "系统默认（Consolas）";
+
+    const options: FontOption[] = [{ value: SYSTEM_FONT, label: systemLabel }];
+    const seen = new Set<string>([SYSTEM_FONT]);
+
+    const add = (family: string) => {
+      if (family && !seen.has(family)) {
+        seen.add(family);
+        options.push({ value: family, label: family });
+      }
+    };
+
+    systemFonts.forEach(add);
+    FALLBACK_FONT_FAMILIES.forEach(add);
+    add(current);
+
+    return options;
+  }
 
   function check(key: keyof AppSettings, label: string, desc: string, keywords?: string): SettingRow {
     return {
@@ -93,6 +140,45 @@ export function OptionsDialog(props: OptionsDialogProps) {
     };
   }
 
+  /** 字体选择：列出本机所有字体，可搜索 */
+  function font(key: keyof AppSettings, label: string, kind: FontKind, desc: string, keywords?: string): SettingRow {
+    const current = String(settings[key] ?? SYSTEM_FONT);
+
+    return {
+      key,
+      label,
+      desc,
+      keywords,
+      control: (
+        <FontSelect
+          value={current}
+          options={fontFamilyOptions(kind, current)}
+          ariaLabel={label}
+          onChange={next => onChange({ [key]: next } as Partial<AppSettings>)}
+        />
+      )
+    };
+  }
+
+  /** 数字输入：不限档位，用户自己填 */
+  function number(key: keyof AppSettings, label: string, desc: string, min: number, max: number, keywords?: string): SettingRow {
+    return {
+      key,
+      label,
+      desc,
+      keywords,
+      control: (
+        <NumberField
+          value={Number(settings[key])}
+          min={min}
+          max={max}
+          ariaLabel={label}
+          onChange={next => onChange({ [key]: next } as Partial<AppSettings>)}
+        />
+      )
+    };
+  }
+
   const categories: Category[] = useMemo(() => [
     {
       id: "appearance",
@@ -117,8 +203,8 @@ export function OptionsDialog(props: OptionsDialogProps) {
             />
           )
         },
-        pick("uiFontSize", "界面字号", "菜单、工具栏、对象树等界面文字大小", String(settings.uiFontSize),
-          sizeOptions(UI_FONT_SIZE_OPTIONS), "font 字体 字号"),
+        font("uiFontFamily", "字体", "ui", "菜单、工具栏、对象树等界面文字使用的字体，可搜索本机字体", "font 字体 系统字体"),
+        number("uiFontSize", "界面字号", "菜单、工具栏、对象树等界面文字大小（px）", 10, 28, "font 字体 字号"),
         check("startMaximized", "启动时最大化窗口", "关闭后按上次的窗口大小启动"),
         check("gridHeaderType", "结果表头显示字段类型", "关掉后表头只显示字段名，行高更紧凑"),
         check("gridRowNumbers", "结果表显示行号列", "左侧的 # 列"),
@@ -130,10 +216,8 @@ export function OptionsDialog(props: OptionsDialogProps) {
       label: "编辑器",
       icon: "code",
       rows: [
-        pick("editorFontSize", "字号", "SQL 编辑器的文字大小", String(settings.editorFontSize),
-          sizeOptions(FONT_SIZE_OPTIONS), "font 字体 字号"),
-        pick("editorFontFamily", "字体", "需要本机装有该字体，否则回退到等宽默认字体",
-          settings.editorFontFamily, EDITOR_FONT_OPTIONS.map(font => ({ value: font, label: font }))),
+        number("editorFontSize", "字号", "SQL 编辑器的文字大小（px）", 10, 40, "font 字体 字号"),
+        font("editorFontFamily", "字体", "editor", "默认用系统字体；也可指定本机已安装的字体，可搜索", "font 字体 系统字体"),
         pick("editorTabSize", "缩进宽度", "一个制表符等于几个空格", String(settings.editorTabSize),
           sizeOptions(TAB_SIZE_OPTIONS, "空格")),
         check("editorWordWrap", "自动换行", "长语句折行显示，不用左右滚动"),
@@ -149,8 +233,8 @@ export function OptionsDialog(props: OptionsDialogProps) {
       label: "数据表格",
       icon: "table",
       rows: [
-        pick("gridFontSize", "字号", "结果表与对象列表的文字大小", String(settings.gridFontSize),
-          sizeOptions(GRID_FONT_SIZE_OPTIONS), "font 字体 字号"),
+        number("gridFontSize", "字号", "结果表与对象列表的文字大小（px）", 10, 28, "font 字体 字号"),
+        font("gridFontFamily", "字体", "grid", "默认用系统字体；也可指定本机已安装的字体，可搜索", "font 字体 系统字体"),
         pick("pageSize", "默认行数限制", "数据页每次读取的行数", String(settings.pageSize),
           PAGE_SIZE_OPTIONS.map(value => ({ value: String(value), label: `${value} 行` })), "分页 行数")
       ]
@@ -164,7 +248,7 @@ export function OptionsDialog(props: OptionsDialogProps) {
           LOG_LIMIT_OPTIONS.map(value => ({ value: String(value), label: `${value} 条` })), "log 日志 条数")
       ]
     }
-  ], [settings, theme, onChange, onThemeChange]);
+  ], [settings, theme, onChange, onThemeChange, systemFonts]);
 
   const needle = keyword.trim().toLowerCase();
   const matched = useMemo(() => categories

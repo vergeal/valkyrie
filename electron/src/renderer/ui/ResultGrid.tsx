@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import { isNumericType, type QueryColumn } from "../api";
 import { KEY } from "../keys";
 import { DateTimePicker } from "./DateTimePicker";
+import { JsonTextArea } from "./JsonTextArea";
 import { Icon } from "./icons";
 
 interface CellRef {
@@ -46,9 +47,8 @@ interface ResultGridProps {
   } | null) => void;
 }
 
-/* 与 styles.css 里 table.grid 的字号保持一致，列宽才是按真实文字量算的 */
-/* 与 styles.css 里 table.grid 的字体保持一致（等宽），列宽才量得准 */
-const GRID_FONT = '14px Consolas, "Cascadia Mono", "Courier New", monospace';
+/* 与 styles.css 里 table.grid 的字体保持一致：从 --grid-font 读，改字体后列宽才量得准 */
+const GRID_FONT_FALLBACK = 'Consolas, "Cascadia Mono", "Courier New", monospace';
 const CELL_PADDING = 20;
 const MIN_COLUMN_WIDTH = 64;
 /* 列宽上限收窄：超长内容改为换行显示，而不是把列撑得很宽 */
@@ -194,7 +194,11 @@ function measureColumns(columns: QueryColumn[], rows: (string | null)[][], fontS
   if (!measureContext)
     return {};
 
-  measureContext.font = GRID_FONT.replace(/^\d+px/, `${fontSize}px`);
+  const family = typeof window === "undefined"
+    ? GRID_FONT_FALLBACK
+    : getComputedStyle(document.documentElement).getPropertyValue("--grid-font").trim() || GRID_FONT_FALLBACK;
+
+  measureContext.font = `${fontSize}px ${family}`;
 
   const widths: Record<number, number> = {};
   const sample = rows.slice(0, MEASURE_ROWS);
@@ -883,13 +887,13 @@ export function ResultGrid(props: ResultGridProps) {
             </div>
 
             {bubbleMode === "text" ? (
-              <textarea
-                ref={textareaRef}
+              <JsonTextArea
+                textareaRef={textareaRef}
                 className="cell-bubble-input"
                 value={draft}
                 spellCheck={false}
-                aria-label="多行编辑单元格"
-                onChange={event => setDraft(event.target.value)}
+                ariaLabel="多行编辑单元格"
+                onChange={setDraft}
               />
             ) : (
               /* 时间类字段：自绘的日期时间选择器（原生控件的分段编辑和系统面板样式改不动） */

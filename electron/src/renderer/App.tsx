@@ -5,16 +5,19 @@ import {
   chooseSavePath,
   invoke,
   messageOf,
+  onAppMenu,
   onEvent,
   onShortcut,
   onWindowState,
   revealPath,
+  setAppMenu,
   setNativeTheme,
   showMessage,
   windowControl,
   type OpenConnectionPayload,
   type ProductMeta,
   type ProgressEvent,
+  type NativeMenuItem,
   type QueryColumn,
   type QueryResultPayload,
   type SavedConnection,
@@ -39,7 +42,7 @@ import { OptionsDialog } from "./ui/OptionsDialog";
 import { Select } from "./ui/Select";
 import { Icon } from "./ui/icons";
 import { LogConsole, appendLog, errorRecord, progressRecord, type LogRecord } from "./ui/LogConsole";
-import { hydrateSettings, loadSettings, saveSettings, type AppSettings, type ThemeMode } from "./settings";
+import { hydrateSettings, loadSettings, resolveFontFamily, saveSettings, type AppSettings, type ThemeMode } from "./settings";
 import { ACCEL, IS_MAC, KEY } from "./keys";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Toaster, toast } from "sonner";
@@ -47,6 +50,8 @@ import { Toaster, toast } from "sonner";
 (self as unknown as { MonacoEnvironment: unknown }).MonacoEnvironment = {
   getWorker: () => new EditorWorker()
 };
+
+/* 编辑器字体的等宽回退由 settings.resolveFontFamily 处理（按平台给系统等宽字体） */
 
 /**
  * 深色主题的 Monaco 配色：对齐 GitHub Dark 的 token 颜色
@@ -424,6 +429,14 @@ export function App() {
    * 有记忆就回到原来那批对象，没记忆就退回该连接的第一个库。
    */
   const objectTargetRef = useRef<Record<string, { view: "tables" | "scripts"; node: SchemaNode | null }>>({});
+  /*
+   * 「对象」页全局只有一页。showTableList / showScriptList 都是先 await 读库再落标签，
+   * 并发触发时各自都看不到对方刚要建的标签，于是会各开一页；这里用 ref 先占住唯一 id，
+   * 让并发调用最终都写到同一个标签上。
+   */
+  const objectTabIdRef = useRef<string | null>(null);
+  /* macOS 系统菜单栏：菜单项 id → 动作（每次渲染刷新，主进程点中后按 id 回调） */
+  const appMenuActionsRef = useRef<Record<string, () => void>>({});
 
   activeTabRef.current = activeTabId;
   sessionRef.current = session;
@@ -488,13 +501,15 @@ export function App() {
     void setNativeTheme(theme);
   }, [theme]);
 
-  /* 选项：界面字号 / 表格字号用 CSS 变量驱动，改完即时生效 */
+  /* 选项：界面字号 / 表格字号、表格字体用 CSS 变量驱动，改完即时生效 */
   useEffect(() => {
     const root = document.documentElement.style;
 
     root.setProperty("--ui-font-size", `${settings.uiFontSize}px`);
+    root.setProperty("--font", resolveFontFamily(settings.uiFontFamily, "ui"));
     root.setProperty("--grid-font-size", `${settings.gridFontSize}px`);
-  }, [settings.uiFontSize, settings.gridFontSize]);
+    root.setProperty("--grid-font", resolveFontFamily(settings.gridFontFamily, "grid"));
+  }, [settings.uiFontSize, settings.uiFontFamily, settings.gridFontSize, settings.gridFontFamily]);
 
   /* 标签条内容超出可视宽度 → 显示右侧的折叠菜单 */
   const tabsSignature = tabs.map(tab => tab.title).join("\u0001");
@@ -545,7 +560,7 @@ export function App() {
       minimap: { enabled: settings.editorMinimap },
       fontSize: settings.editorFontSize,
       lineHeight: Math.round(settings.editorFontSize * 1.45),
-      fontFamily: `"${settings.editorFontFamily}", Consolas, "Courier New", monospace`,
+      fontFamily: resolveFontFamily(settings.editorFontFamily, "editor"),
       lineNumbers: settings.editorLineNumbers ? "on" : "off",
       tabSize: settings.editorTabSize,
       wordWrap: settings.editorWordWrap ? "on" : "off",
@@ -751,7 +766,7 @@ export function App() {
     editor.updateOptions({
       fontSize: settings.editorFontSize,
       lineHeight: Math.round(settings.editorFontSize * 1.45),
-      fontFamily: `"${settings.editorFontFamily}", Consolas, "Courier New", monospace`,
+      fontFamily: resolveFontFamily(settings.editorFontFamily, "editor"),
       wordWrap: settings.editorWordWrap ? "on" : "off",
       lineNumbers: settings.editorLineNumbers ? "on" : "off",
       tabSize: settings.editorTabSize,
@@ -1607,6 +1622,31 @@ export function App() {
   }
 
   /**
+   * 「对象」页的唯一 id。已有页面就用它的 id；还没有则同步占一个，
+   * 并发调用拿到同一个 id，落标签时按 id 合并，保证全局只有一页。
+   */
+  function objectTabId(): string {
+    const existing = findObjectTab();
+
+    if (existing) {
+      objectTabIdRef.current = existing.id;
+      return existing.id;
+    }
+
+    if (!objectTabIdRef.current)
+      objectTabIdRef.current = `tab-${tabSequence++}`;
+
+    return objectTabIdRef.current;
+  }
+
+  /** 把「对象」页按 id 落位：存在就替换内容，不存在才插到最左侧 */
+  function upsertObjectTab(tab: ObjectTab) {
+    setTabs(previous => previous.some(item => item.id === tab.id)
+      ? previous.map(item => item.id === tab.id ? tab : item)
+      : [tab, ...previous]);
+  }
+
+  /**
    * 让「对象」列显示某个节点下的数据表列表（Navicat 风格的对象页）。
    *
    * - 选中表 → 显示它所在的容器，并把该表高亮；
@@ -1672,7 +1712,8 @@ export function App() {
       return;
     }
 
-    const existing = findObjectTab();
+    const objectId = objectTabId();
+    const existing = tabs.find((tab): tab is ObjectTab => tab.id === objectId && tab.kind === "objects") ?? null;
     const sameContainer = existing?.connection === owner.name
       && existing.view === "tables" && existing.node
       && existing.node.catalog === container.catalog
@@ -1695,38 +1736,8 @@ export function App() {
     /* 切换库 / 模式时也让列表"空一下再出现"，和刷新一个观感 */
     setListFlash(previous => previous + 1);
 
-    if (existing) {
-      /* 更新内容，并把它固定在标签栏最左侧（不允许被移动/挤走） */
-      setTabs(previous => {
-        const current = previous.find(tab => tab.id === existing.id);
-
-        if (!current)
-          return previous;
-
-        return [
-          {
-            ...current,
-            view: "tables",
-            connection: owner.name,
-            node: container,
-            tables,
-            loading: false,
-            title: OBJECT_TAB_TITLE
-          } as WorkTab,
-          ...previous.filter(tab => tab.id !== existing.id)
-        ];
-      });
-
-      if (options.activate !== false)
-        setActiveTabId(existing.id);
-
-      setTableFilter("");
-      setTableSelection(highlight ? [highlight] : []);
-      return;
-    }
-
     const tab: ObjectTab = {
-      id: `tab-${tabSequence++}`,
+      id: objectId,
       kind: "objects",
       view: "tables",
       connection: owner.name,
@@ -1735,11 +1746,11 @@ export function App() {
       messages: [],
       node: container,
       tables,
-      scripts: [],
+      scripts: existing?.scripts ?? [],
       loading: false
     };
 
-    setTabs(previous => [tab, ...previous]);
+    upsertObjectTab(tab);
 
     if (options.activate !== false)
       setActiveTabId(tab.id);
@@ -1983,14 +1994,19 @@ export function App() {
   /* ------------------------------ 查询脚本 ------------------------------ */
 
   /** 打开脚本文件（对象树里的脚本节点与「脚本」页共用一条路径） */
-  async function openScriptFile(file: { name: string; catalog: string }) {
-    if (!session) {
+  async function openScriptFile(file: { name: string; catalog: string; connection?: string }) {
+    /* 脚本页属于某个连接，打开时要按它的连接读，不能跟着当前活动会话 */
+    const owner = file.connection ? sessionByName(file.connection) : session;
+
+    if (!owner) {
       setError("请先在左侧选择一个连接");
       return;
     }
 
+    const connection = owner.name;
     const existing = tabs.find(tab =>
-      tab.kind === "query" && tab.script?.name === file.name && tab.script?.catalog === file.catalog);
+      tab.kind === "query" && tab.script?.name === file.name && tab.script?.catalog === file.catalog
+      && tab.script?.connection === connection);
 
     if (existing) {
       setActiveTabId(existing.id);
@@ -1999,7 +2015,7 @@ export function App() {
 
     try {
       const payload = await invoke<{ content: string }>("queryFiles.read", {
-        connection: session.name,
+        connection,
         catalog: file.catalog,
         name: file.name
       });
@@ -2008,8 +2024,8 @@ export function App() {
       tab.title = file.name;
       tab.sql = payload.content;
       tab.savedSql = payload.content;
-      tab.script = { connection: session.name, catalog: file.catalog, name: file.name };
-      tab.path = { connection: session.name, catalog: file.catalog };
+      tab.script = { connection, catalog: file.catalog, name: file.name };
+      tab.path = { connection, catalog: file.catalog };
 
       setTabs(previous => [...previous, tab]);
       setActiveTabId(tab.id);
@@ -2020,7 +2036,11 @@ export function App() {
   }
 
   async function openScript(node: SchemaNode) {
-    await openScriptFile({ name: node.label, catalog: node.catalog ?? "default" });
+    await openScriptFile({
+      name: node.label,
+      catalog: node.catalog ?? "default",
+      connection: connectionOfNode(node)
+    });
   }
 
   /** 当前上下文所属的数据库目录（脚本按「连接/数据库」分目录存放） */
@@ -2194,7 +2214,8 @@ export function App() {
       return [];
 
     const payload = await invoke<{ files: ScriptFile[] }>("queryFiles.list", { connection: active.name });
-    return payload.files ?? [];
+    /* 脚本页是整连接共用的，点开时要按它所属连接读，这里把归属带上 */
+    return (payload.files ?? []).map(file => ({ ...file, connection: active.name }));
   }
 
   /**
@@ -2216,7 +2237,8 @@ export function App() {
       return;
     }
 
-    const existing = findObjectTab();
+    const objectId = objectTabId();
+    const existing = tabs.find((tab): tab is ObjectTab => tab.id === objectId && tab.kind === "objects") ?? null;
 
     /* 已经在看这个连接的脚本列表：只切过去 / 定位，不重新扫目录 */
     if (existing?.connection === owner.name && existing.view === "scripts" && !options.force) {
@@ -2249,7 +2271,7 @@ export function App() {
     }
 
     const tab: ObjectTab = {
-      id: `tab-${tabSequence++}`,
+      id: objectId,
       kind: "objects",
       view: "scripts",
       connection: owner.name,
@@ -2262,8 +2284,8 @@ export function App() {
       loading: false
     };
 
-    /* 「对象」列固定在标签栏最左侧 */
-    setTabs(previous => [tab, ...previous]);
+    /* 「对象」列固定在标签栏最左侧；并发调用按 id 合并成一页 */
+    upsertObjectTab(tab);
 
     if (options.activate !== false)
       setActiveTabId(tab.id);
@@ -3360,6 +3382,13 @@ export function App() {
       const shift = event.shiftKey;
       const target = event.target as HTMLElement | null;
 
+      /* 选项：⌘/Ctrl+,（macOS 由原生菜单项转发，这里兜住 Windows / Linux 与输入焦点内） */
+      if (!shift && key === ",") {
+        event.preventDefault();
+        setOptionsOpen(true);
+        return;
+      }
+
       /* 执行：Monaco 没绑 Ctrl+R，编辑器里也必须在这里处理，否则按了没反应 */
       if (!shift && key === "r") {
         event.preventDefault();
@@ -4009,7 +4038,19 @@ export function App() {
         { label: "收窄选中", accelerator: ACCEL.shrink, disabled: activeTab?.kind !== "query", action: () => editorRef.current?.trigger("menu", "editor.action.smartSelect.shrink", null) },
         { separator: true },
         { label: "全选", accelerator: ACCEL.selectAll, action: () => selectAllInPage() },
-        { label: "复制", accelerator: ACCEL.copy, action: () => editorRef.current?.trigger("menu", "editor.action.clipboardCopyAction", null) },
+        {
+          label: "复制",
+          accelerator: ACCEL.copy,
+          action: () => {
+            /* 编辑器里用 Monaco 的复制，结果表有选区就复制成制表符分隔，其余走系统默认 */
+            const focused = document.activeElement as HTMLElement | null;
+
+            if (focused?.closest?.(".editor"))
+              editorRef.current?.trigger("menu", "editor.action.clipboardCopyAction", null);
+            else if (focused?.closest?.("input, textarea") || !gridCopyRef.current())
+              document.execCommand?.("copy");
+          }
+        },
         { label: "粘贴", accelerator: ACCEL.paste, action: () => editorRef.current?.trigger("menu", "editor.action.clipboardPasteAction", null) }
       ]
     },
@@ -4056,7 +4097,7 @@ export function App() {
         { label: "连接管理…", action: () => setManagerOpen(true) },
         { label: "新建连接", icon: "plus", children: newConnectionMenuEntries() },
         { separator: true },
-        { label: "选项…", action: () => setOptionsOpen(true) }
+        { label: "选项…", accelerator: ACCEL.options, action: () => setOptionsOpen(true) }
       ]
     },
     {
@@ -4072,6 +4113,55 @@ export function App() {
       ]
     }
   ];
+
+  /*
+   * macOS：菜单栏用系统顶部菜单栏。把上面这份菜单转成可序列化结构交给主进程，
+   * 点击后主进程回传项 id，这里再按 id 找到对应的动作执行（动作闭包只存在渲染层）。
+   * 菜单结构 / 可用态没变时（比如只是结果集变了）不重建，避免系统菜单频繁闪烁。
+   */
+  const appMenuActions: Record<string, () => void> = {};
+
+  const serializeAppMenuItem = (entry: MenuEntry, id: string): NativeMenuItem => {
+    if (entry.separator)
+      return { type: "separator" };
+
+    const item: NativeMenuItem = { id, label: entry.label ?? "", enabled: !entry.disabled };
+
+    if (entry.accelerator)
+      item.accelerator = entry.accelerator;
+
+    if (entry.children?.length)
+      item.submenu = entry.children.map((child, index) => serializeAppMenuItem(child, `${id}.${index}`));
+    else if (entry.action)
+      appMenuActions[id] = entry.action;
+
+    return item;
+  };
+
+  const appMenuTemplate: NativeMenuItem[] = menus.map((menu, index) => ({
+    label: menu.label,
+    submenu: menu.items.map((entry, itemIndex) => serializeAppMenuItem(entry, `${index}.${itemIndex}`))
+  }));
+
+  appMenuActionsRef.current = appMenuActions;
+
+  const appMenuSignature = JSON.stringify(appMenuTemplate);
+
+  useEffect(() => {
+    if (!IS_MAC)
+      return;
+
+    void setAppMenu(appMenuTemplate);
+    /* 只在结构与可用态变化时同步；动作通过 ref 取最新，不进依赖 */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appMenuSignature]);
+
+  useEffect(() => {
+    if (!IS_MAC)
+      return;
+
+    return onAppMenu(id => appMenuActionsRef.current[id]?.());
+  }, []);
 
   /* 当前标签在对象树里对应的节点（有才给「定位」按钮） */
   const locatableNode = treeNodeOfTab(activeTab);
@@ -4105,18 +4195,20 @@ export function App() {
         </span>
       </header>
 
-      <nav className="menubar" onMouseLeave={() => setOpenMenu(null)}>
-        {menus.map(menu => (
-          <MenuButton
-            key={menu.label}
-            label={menu.label}
-            entries={menu.items}
-            open={openMenu === menu.label}
-            onOpenChange={open => setOpenMenu(open ? menu.label : null)}
-          />
-        ))}
-        <span className="menubar-right">{status}</span>
-      </nav>
+      {!IS_MAC && (
+        <nav className="menubar" onMouseLeave={() => setOpenMenu(null)}>
+          {menus.map(menu => (
+            <MenuButton
+              key={menu.label}
+              label={menu.label}
+              entries={menu.items}
+              open={openMenu === menu.label}
+              onOpenChange={open => setOpenMenu(open ? menu.label : null)}
+            />
+          ))}
+          <span className="menubar-right">{status}</span>
+        </nav>
+      )}
 
       <div className="toolbar">
         {/* 新建连接（二级菜单选库类型）：原来这里是「刷新连接」按钮 */}

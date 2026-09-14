@@ -1213,6 +1213,8 @@ public class RpcServer
                         json.put("kind", "QUERY");
                         json.put("hasChildren", false);
                         json.put("path", file.getAbsolutePath());
+                        /* 打开脚本要用「连接/数据库/文件名」拼路径，树节点必须带上所属数据库 */
+                        json.put("catalog", catalogOf(node));
                         json.put("size", file.length());
                         json.put("modified", file.lastModified());
                         nodes.add(json);

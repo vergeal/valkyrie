@@ -54,10 +54,23 @@ contextBridge.exposeInMainWorld("valkyrie", {
   /* 系统原生右键菜单：返回被选中项的 id */
   showMenu: options => ipcRenderer.invoke("valkyrie:show-menu", options),
 
+  /* macOS 系统菜单栏：同步菜单 / 订阅选中项 */
+  setAppMenu: items => ipcRenderer.invoke("valkyrie:set-app-menu", items),
+  onAppMenu: callback => {
+    const listener = (_event, id) => callback(id);
+
+    ipcRenderer.on("valkyrie:app-menu", listener);
+
+    return () => ipcRenderer.off("valkyrie:app-menu", listener);
+  },
+
   /* 让原生菜单 / 系统对话框跟随应用主题 */
   setNativeTheme: theme => ipcRenderer.invoke("valkyrie:set-native-theme", theme),
 
   /* 客户端设置：主进程写到 userData/settings.json */
   loadSettings: () => ipcRenderer.invoke("valkyrie:settings-load"),
-  saveSettings: settings => ipcRenderer.invoke("valkyrie:settings-save", settings)
+  saveSettings: settings => ipcRenderer.invoke("valkyrie:settings-save", settings),
+
+  /* 本机字体族列表（选项里的字体下拉） */
+  listFonts: () => ipcRenderer.invoke("valkyrie:list-fonts")
 });
