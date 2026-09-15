@@ -78,11 +78,16 @@ export function TableList(props: TableListProps) {
   const [refreshing, setRefreshing] = useState(false);
   /* Shift 连选时的锚点（按当前可见顺序的下标） */
   const anchor = useRef<number | null>(null);
+  /* 挂载时的初始计数：首屏（首次加载）本来就没有旧内容可换，不该闪 */
+  const initialFlash = useRef(flashToken);
+  /* 上一次闪烁的结束时刻：短时间内的连续信号合并成一次，避免连闪 */
+  const flashUntil = useRef(0);
 
   useEffect(() => {
-    if (!flashToken)
+    if (flashToken === initialFlash.current || Date.now() < flashUntil.current)
       return;
 
+    flashUntil.current = Date.now() + 140;
     setRefreshing(true);
     const timer = window.setTimeout(() => setRefreshing(false), 140);
     return () => window.clearTimeout(timer);

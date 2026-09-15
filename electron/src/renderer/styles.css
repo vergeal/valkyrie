@@ -260,8 +260,18 @@ input, textarea, .console, .pre-wrap { user-select: text; }
 }
 
 
-.work-body.no-side .side-panel, .work-body.no-side [data-separator] { display: none; }
-.work-body.no-info .info-panel { display: none; }
+/*
+ * 隐藏面板要作用在 react-resizable-panels 的外层 flex 项（[data-panel]）上：
+ * 内层 .side-panel / .info-panel 不是 flex 项，只把它 display:none 的话外层仍占着
+ * flex-grow 的份额，剩下的面板不会自动铺开。外层带内联 display:flex，必须用
+ * !important 才盖得住。分隔条也按各自的 class 单独隐藏，别把没被隐藏那一侧的
+ * 分隔条一起干掉。
+ */
+.work-body.no-side [data-panel][id="side"],
+.work-body.no-side .splitter-side { display: none !important; }
+
+.work-body.no-info [data-panel][id="info"],
+.work-body.no-info .splitter-info { display: none !important; }
 .menubar-right { margin-left: auto; padding-right: 6px; color: var(--muted); font-size: 12px; }
 
 .toolbar, .pane-toolbar {
@@ -1819,6 +1829,30 @@ table.grid tbody tr td.grid-filler.is-range {
   background: transparent;
 }
 
+/*
+ * 表头占位列：表头 th 默认带内边距、右边框和底色，会让这一格看起来像多出来的一列
+ * 带灰底的空白。这里与数据行占位列保持一致：去掉内边距 / 边框 / 底色，只负责吃掉
+ * 剩余宽度，数据列因此保持按内容实测的固定宽度。
+ */
+table.grid thead th.grid-filler {
+  width: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* 虚拟滚动的占位行：只用来撑出被裁掉的高度，不画任何背景 / 边框 */
+table.grid tbody tr.grid-spacer td {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 0;
+  line-height: 0;
+  pointer-events: none;
+}
+
 /* 刷新反馈：整张表（含列头）先消失一瞬，再随新数据出现（像重新载入） */
 table.grid.is-refreshing,
 table.table-list.is-refreshing {
@@ -2636,6 +2670,10 @@ table.design-table td { padding: 2px 6px; }
 .conn-table .is-error { color: var(--red); max-width: 360px; }
 
 /* 脚本对象页 */
+/* 列与列之间留出更多间距，名字 / 数据库 / 大小 / 日期不会挤在一起 */
+table.script-list th,
+table.script-list td { padding-right: 28px; }
+
 table.script-list .script-catalog {
   display: inline-flex;
   align-items: center;

@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -250,11 +251,17 @@ export function ResultGrid(props: ResultGridProps) {
   const [colMode, setColMode] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
+  /* 挂载时的初始计数：首屏（首次加载）本来就没有旧内容可换，不该闪 */
+  const initialFlash = useRef(flashToken);
+  /* 上一次闪烁的结束时刻：短时间内的连续信号合并成一次，避免连闪 */
+  const flashUntil = useRef(0);
+
   /* 刷新反馈：内容先清空一瞬再重新出现（不弹提示） */
   useEffect(() => {
-    if (!flashToken)
+    if (flashToken === initialFlash.current || Date.now() < flashUntil.current)
       return;
 
+    flashUntil.current = Date.now() + 140;
     setRefreshing(true);
     const timer = window.setTimeout(() => setRefreshing(false), 140);
     return () => window.clearTimeout(timer);
@@ -272,6 +279,36 @@ export function ResultGrid(props: ResultGridProps) {
   const lastResizeAt = useRef(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
+
+  /*
+   * 虚拟滚动：只渲染视口附近的行，数据上千条也不卡。
+   * 行高统一（单行 + 省略号），用实测值算窗口；测到之前按字号估一个，
+   * 免得首帧把整份结果一次性渲染出来。
+   */
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(
+    typeof window === "undefined" ? 600 : window.innerHeight
+  );
+  const [rowHeight, setRowHeight] = useState(0);
+  const measureRowRef = useRef<HTMLTableRowElement | null>(null);
+  const scrollFrame = useRef(0);
+
+  /* 容器尺寸变化（面板缩放 / 窗口大小）时重算可见行数 */
+  useEffect(() => {
+    const wrap = wrapRef.current;
+
+    if (!wrap)
+      return;
+
+    const update = () => setViewportHeight(wrap.clientHeight);
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(wrap);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => () => window.cancelAnimationFrame(scrollFrame.current), []);
 
   useEffect(() => {
     if (!editing)
@@ -420,18 +457,50 @@ export function ResultGrid(props: ResultGridProps) {
    * 保留真实行号，编辑 / 脏数据标记 / 选区都以原始下标为准，不会因过滤而错行。
    */
   const keyword = search.trim().toLowerCase();
-  const visibleRows = keyword
-    ? rows.reduce<{ row: (string | null)[]; index: number }[]>((list, row, index) => {
-        if (row.some(cell => cell !== null && String(cell).toLowerCase().includes(keyword)))
-          list.push({ row, index });
+  const visibleRows = useMemo(() => {
+    if (!keyword)
+      return rows.map((row, index) => ({ row, index }));
 
-        return list;
-      }, [])
-    : rows.map((row, index) => ({ row, index }));
+    const list: { row: (string | null)[]; index: number }[] = [];
+
+    rows.forEach((row, index) => {
+      if (row.some(cell => cell !== null && String(cell).toLowerCase().includes(keyword)))
+        list.push({ row, index });
+    });
+
+    return list;
+  }, [rows, keyword]);
 
   useEffect(() => {
     onSearchHitsChange?.(keyword ? visibleRows.length : null);
   }, [keyword, visibleRows.length, onSearchHitsChange]);
+
+  /* 实测第一行的高度，替换按字号估的近似值（字号 / 列 / 数据变了要重新量） */
+  useLayoutEffect(() => {
+    const height = measureRowRef.current?.getBoundingClientRect().height;
+
+    if (height)
+      setRowHeight(Math.round(height));
+  }, [fontSize, columnSignature, visibleRows.length]);
+
+  /*
+   * 可见行窗口：按滚动位置 + 容器高度换算成下标区间，上下各留几行缓冲，
+   * 其余用两个等高的占位行把滚动条撑住。行高没实测到之前按字号估。
+   */
+  const rowHeightEstimate = Math.max(1, Math.round(fontSize * 1.3 + 9));
+  const effectiveRowHeight = rowHeight || rowHeightEstimate;
+  const totalRows = visibleRows.length;
+  const overscan = 8;
+  const windowStart = totalRows === 0
+    ? 0
+    : Math.max(0, Math.floor(scrollTop / effectiveRowHeight) - overscan);
+  const windowEnd = totalRows === 0
+    ? 0
+    : Math.min(totalRows, Math.ceil((scrollTop + viewportHeight) / effectiveRowHeight) + overscan);
+  const topSpacer = windowStart * effectiveRowHeight;
+  const bottomSpacer = Math.max(0, (totalRows - windowEnd) * effectiveRowHeight);
+  const renderedRows = visibleRows.slice(windowStart, windowEnd);
+  const firstRenderedIndex = renderedRows[0]?.index;
 
   /*
    * 选区范围：
@@ -649,7 +718,17 @@ export function ResultGrid(props: ResultGridProps) {
     return <div className="empty">执行结果将显示在这里</div>;
 
   return (
-    <div className="grid-wrap" ref={wrapRef}>
+    <div
+      className="grid-wrap"
+      ref={wrapRef}
+      onScroll={event => {
+        /* 一帧只跟一次：滚动过程中连续 setState 会拖慢滚动 */
+        const top = event.currentTarget.scrollTop;
+
+        window.cancelAnimationFrame(scrollFrame.current);
+        scrollFrame.current = window.requestAnimationFrame(() => setScrollTop(top));
+      }}
+    >
       <table className={`grid${editable ? " is-editable" : ""}${refreshing ? " is-refreshing" : ""}`}>
         <thead>
           <tr>
@@ -699,7 +778,13 @@ export function ResultGrid(props: ResultGridProps) {
           </tr>
         </thead>
         <tbody>
-          {visibleRows.map(({ row, index: rowIndex }) => {
+          {/* 上方占位行：把被窗口裁掉的行高撑出来，滚动条长度不变 */}
+          {topSpacer > 0 && (
+            <tr className="grid-spacer" aria-hidden="true">
+              <td colSpan={columns.length + 2} style={{ height: topSpacer }} />
+            </tr>
+          )}
+          {renderedRows.map(({ row, index: rowIndex }) => {
             const dirty = dirtyRows.includes(rowIndex);
             /* 待删除（还没提交）：划掉，提交之后才会真的从结果里消失 */
             const deleted = deletedRows.includes(rowIndex);
@@ -709,6 +794,7 @@ export function ResultGrid(props: ResultGridProps) {
             return (
               <tr
                 key={rowIndex}
+                ref={rowIndex === firstRenderedIndex ? measureRowRef : undefined}
                 className={[
                   dirty ? "is-dirty" : "",
                   deleted ? "is-deleted" : "",
@@ -819,6 +905,12 @@ export function ResultGrid(props: ResultGridProps) {
               </tr>
             );
           })}
+          {/* 下方占位行：撑住滚动条剩余高度 */}
+          {bottomSpacer > 0 && (
+            <tr className="grid-spacer" aria-hidden="true">
+              <td colSpan={columns.length + 2} style={{ height: bottomSpacer }} />
+            </tr>
+          )}
           {/* 全表搜索没有命中时给一行提示，避免表格看起来是空的 */}
           {keyword && visibleRows.length === 0 && (
             <tr className="grid-none">
