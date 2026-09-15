@@ -161,7 +161,7 @@ export function useQueryContext(deps: QueryContextDeps) {
     return () => {
       cancelled = true;
     };
-  }, [session, activeCatalog, roots, loadChildren]);
+  }, [session, activeCatalog, roots]);
 
   /* 切换模式：加载该模式下的表 */
   useEffect(() => {
@@ -198,7 +198,7 @@ export function useQueryContext(deps: QueryContextDeps) {
     return () => {
       cancelled = true;
     };
-  }, [session, activeSchema, schemaOptions, loadChildren]);
+  }, [session, activeSchema, schemaOptions]);
 
   /** 选中节点 → 执行上下文：连接名 + 数据库 + 模式 */
   function selectionContext(): { connection?: string; catalog?: string; schema?: string } {
