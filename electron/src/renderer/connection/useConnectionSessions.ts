@@ -47,6 +47,11 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
   /* 每个连接各自的数据库根节点 */
   const [rootsByConnection, setRootsByConnection] = useState<Record<string, SchemaNode[]>>({});
   const [roots, setRoots] = useState<SchemaNode[]>([]);
+  /* 正在建立连接的连接名：防止连接未完成时被重复打开（会开出两个会话） */
+  const [openingConnections, setOpeningConnections] = useState<Set<string>>(new Set());
+  const openingRef = useRef<Set<string>>(new Set());
+  /* 打开过程中被关闭（取消）的连接名：结果回来时丢弃，不落会话 */
+  const cancelledOpensRef = useRef<Set<string>>(new Set());
 
   /* 断开连接后仍要能提示：记住最近一次连接的连接名与数据库类型 */
   const lastSessionRef = useRef<{ name?: string; type: string }>({ type: "mysql" });
@@ -76,12 +81,12 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
    */
   async function openConnection(connection: SavedConnection, options: { focusPage?: boolean } = {}) {
     setError(null);
-    setStatus(`正在连接 ${connection.name} …`);
 
     /* 已经连上就直接切过去：多连接并存，不会把别的连接顶掉 */
     const opened = openSessions[connection.name];
 
     if (opened) {
+      setStatus(`正在连接 ${connection.name} …`);
       setSession(opened);
       lastSessionRef.current = { name: connection.name, type: connection.type ?? lastSessionRef.current.type };
       setStatus(`已切换到 ${connection.name}`);
@@ -115,13 +120,32 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
       return true;
     }
 
+    /*
+     * 正在连接中：直接忽略这次调用，避免同一个连接被打开两次（会开出两个会话）。
+     * 连接完成后如果连接已不在，说明期间被关闭过，同样不落会话。
+     */
+    if (openingRef.current.has(connection.name)) {
+      setStatus(`正在连接 ${connection.name} …`);
+      return false;
+    }
+
+    setStatus(`正在连接 ${connection.name} …`);
+
     /* 连接期间在对应节点上显示加载动画 */
     const nodeId = `conn:${connection.name}`;
 
+    openingRef.current.add(connection.name);
+    cancelledOpensRef.current.delete(connection.name);
+    setOpeningConnections(previous => new Set(previous).add(connection.name));
     setLoadingNodes(previous => new Set(previous).add(nodeId));
 
     try {
       const payload = await withBusy(() => invoke<OpenConnectionPayload>("connection.open", { name: connection.name }));
+
+      /* 连接过程中被关闭（取消）：结果回来直接丢弃，不落会话 */
+      if (cancelledOpensRef.current.has(connection.name))
+        return false;
+
       const next = { sessionId: payload.sessionId, name: connection.name, product: payload.product };
 
       setOpenSessions(previous => ({ ...previous, [connection.name]: next }));
@@ -144,10 +168,20 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
 
       return true;
     } catch (e) {
-      setError(messageOf(e));
-      setStatus("连接失败");
+      /* 取消后的失败不再报错提示 */
+      if (!cancelledOpensRef.current.has(connection.name)) {
+        setError(messageOf(e));
+        setStatus("连接失败");
+      }
       return false;
     } finally {
+      cancelledOpensRef.current.delete(connection.name);
+      openingRef.current.delete(connection.name);
+      setOpeningConnections(previous => {
+        const next = new Set(previous);
+        next.delete(connection.name);
+        return next;
+      });
       setLoadingNodes(previous => {
         const next = new Set(previous);
         next.delete(nodeId);
@@ -170,6 +204,10 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
 
     if (!target || !tabsApi)
       return;
+
+    /* 正在连接中的连接被关闭：标记取消，正在进行的打开流程回来后会丢弃结果 */
+    if (openingRef.current.has(target))
+      cancelledOpensRef.current.add(target);
 
     const tabs = tabsApi.tabs;
     const targetSession = openSessions[target] ?? (session?.name === target ? session : null);
@@ -361,7 +399,8 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
       return;
 
     try {
-      if (openSessions[name] || session?.name === name)
+      /* 正在连接 / 已连接都先关闭（连接中的会被标记取消），再删配置 */
+      if (openSessions[name] || session?.name === name || openingRef.current.has(name))
         await disconnect(name);
 
       await invoke("connections.delete", { name });
@@ -393,6 +432,7 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
     openSessions, setOpenSessions,
     rootsByConnection, setRootsByConnection,
     roots, setRoots,
+    openingConnections,
     refreshConnections, openConnection, disconnect,
     openAllConnections, closeAllConnections, refreshConnectionRoots, deleteConnection, onConnectionSaved
   };

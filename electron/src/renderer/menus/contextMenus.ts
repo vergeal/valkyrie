@@ -13,6 +13,8 @@ import { treeNodeOfTab } from "../tabs/tabHelpers";
 export interface MenuContext {
   expanded: Set<string>;
   openSessions: Record<string, SessionState>;
+  /** 正在建立连接的连接名：菜单据此显示「关闭连接」，避免连接未完成时重复打开 */
+  openingConnections: Set<string>;
   connections: SavedConnection[];
   session: SessionState | null;
   activeNode: SchemaNode | null;
@@ -116,11 +118,14 @@ export function buildContextMenu(node: SchemaNode, ctx: MenuContext): MenuEntry[
   }
 
   if (node.kind === "CONNECTION") {
+    /* 连接中或已连接都算「已打开」：连接过程中不再提供「打开连接」，避免开出两个会话 */
+    const active = Boolean(node.connected) || ctx.openingConnections.has(node.label);
+
     return [
       {
-        label: node.connected ? "关闭连接" : "打开连接",
+        label: active ? "关闭连接" : "打开连接",
         /* 关闭连接 = 真正断开：关掉该连接下的数据页 / 设计页 / 对象页 */
-        action: () => void (node.connected ? ctx.disconnect(node.label) : ctx.toggleNode(node))
+        action: () => void (active ? ctx.disconnect(node.label) : ctx.toggleNode(node))
       },
       { label: "新建查询", action: ctx.createQueryTab },
       { separator: true },

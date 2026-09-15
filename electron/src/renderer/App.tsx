@@ -127,7 +127,7 @@ export function App() {
   });
   const {
     connections, session, setSession, sessionRef, lastSessionRef,
-    openSessions, rootsByConnection, roots, setRoots,
+    openSessions, rootsByConnection, roots, setRoots, openingConnections,
     refreshConnections, openConnection, disconnect,
     openAllConnections, closeAllConnections, refreshConnectionRoots, deleteConnection, onConnectionSaved
   } = connection;
@@ -424,7 +424,7 @@ export function App() {
 
   /* 菜单构建需要的状态与动作：集中组装成 MenuContext，交给 menus 模块构建菜单 */
   const menuContext: MenuContext = {
-    expanded, openSessions, connections, session, activeNode, roots, treeChildren, tabs, activeTab,
+    expanded, openSessions, openingConnections, connections, session, activeNode, roots, treeChildren, tabs, activeTab,
     objectSelections, scriptSelections, tableSelection, scriptSelection,
     showSide, showInfo, currentConnection, editorRef, gridCopyRef,
     setShowSide, setShowInfo, setTheme, setConnectionDialog, setManagerOpen, setOptionsOpen, setMessageBox,
