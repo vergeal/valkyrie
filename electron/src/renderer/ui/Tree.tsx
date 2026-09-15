@@ -31,12 +31,36 @@ function iconFor(node: SchemaNode): string {
       return "database";
     case "SCHEMA":
       return "folder";
+    case "VIEW":
+      return "eye";
+    case "TRIGGER":
+      return "zap";
+    case "COLUMN":
+      return node.hasChildren ? "folderOpen" : "columns";
+    case "INDEX":
+      return node.hasChildren ? "folderOpen" : "key";
+    case "FOREIGN_KEY":
+      return node.hasChildren ? "folderOpen" : "link";
     case "QUERY":
       return "terminal";
     default:
-      /* 表容器用文件夹，实际数据表用表格图标 */
-      return node.hasChildren ? "folderOpen" : "table";
+      /* 「数据表」容器用文件夹，实际数据表用表格图标 */
+      return node.hasChildren && !node.table ? "folderOpen" : "table";
   }
+}
+
+/** 明细叶子节点的补充说明：字段类型 / 索引字段 / 外键引用对象 */
+function detailFor(node: SchemaNode): string | undefined {
+  if (node.kind === "COLUMN" && node.column)
+    return [node.column.type, node.column.primary ? "PK" : ""].filter(Boolean).join(" · ") || undefined;
+
+  if (node.kind === "INDEX" && node.index)
+    return node.index.columnsText || node.index.type;
+
+  if (node.kind === "FOREIGN_KEY" && node.foreignKey)
+    return node.foreignKey.refTable ? `→ ${node.foreignKey.refTable}(${node.foreignKey.refColumnsText ?? ""})` : undefined;
+
+  return undefined;
 }
 
 function matches(node: SchemaNode, childrenMap: Record<string, SchemaNode[]>, keyword: string): boolean {
@@ -59,8 +83,9 @@ export function Tree(props: TreeProps) {
 
     const open = expanded.has(node.id) || (filter.length > 0 && Boolean(childrenMap[node.id]));
     const children = childrenMap[node.id];
-    const isTable = node.kind === "TABLE" && !node.hasChildren && Boolean(node.table);
+    const isTable = node.kind === "TABLE" && Boolean(node.table);
     const count = isTable ? node.table?.rows : undefined;
+    const detail = detailFor(node);
 
     return (
       <div className="tree-node" key={node.id}>
@@ -84,6 +109,7 @@ export function Tree(props: TreeProps) {
               event.stopPropagation();
               onToggle(node);
             }}
+            onDoubleClick={event => event.stopPropagation()}
           >
             {node.hasChildren && <Icon name={open ? "chevronDown" : "chevronRight"} size={13} />}
           </span>
@@ -96,6 +122,7 @@ export function Tree(props: TreeProps) {
               : <Icon name={iconFor(node)} size={14} />}
           </span>
           <span className="tree-label">{node.label}</span>
+          {detail && <span className="tree-detail">{detail}</span>}
 
           {node.badge && <span className="tree-badge">{node.badge}</span>}
           {node.kind === "CONNECTION" && <span className={`tree-dot${node.connected ? " is-on" : ""}`} aria-hidden="true" />}

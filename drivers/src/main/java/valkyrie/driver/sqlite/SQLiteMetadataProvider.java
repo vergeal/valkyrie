@@ -23,7 +23,7 @@ public class SQLiteMetadataProvider implements DBMetadataProvider
         public List<DBNode> getChildrenOfCatalog(DBCatalogNode catalogNode)
         {
                 return Lists.of(
-                        new DBTableContainerNode(catalogNode, driver::getTables),
+                        new DBTableContainerNode(catalogNode, driver),
                         new DBQueryContainerNode(catalogNode)
                 );
         }

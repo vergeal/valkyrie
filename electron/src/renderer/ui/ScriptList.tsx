@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { ScriptFile } from "../api";
+import { formatByteSize } from "../app/format";
 import { Icon } from "./icons";
 
 type SortKey = "name" | "catalog" | "size" | "modified";
@@ -23,19 +24,6 @@ const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
   { key: "size", label: "大小", className: "is-num" },
   { key: "modified", label: "修改日期", className: "is-time" }
 ];
-
-function formatSize(size?: number): string {
-  if (size == null)
-    return "-";
-
-  if (size < 1024)
-    return `${size} B`;
-
-  if (size < 1024 * 1024)
-    return `${(size / 1024).toFixed(1)} KB`;
-
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
 
 function formatTime(value?: number): string {
   if (!value)
@@ -190,7 +178,7 @@ export function ScriptList(props: ScriptListProps) {
                   {script.catalog || "-"}
                 </span>
               </td>
-              <td className="is-num">{formatSize(script.size)}</td>
+              <td className="is-num">{formatByteSize(script.size)}</td>
               <td className="is-time">{formatTime(script.modified)}</td>
               <td className="table-filler" />
             </tr>

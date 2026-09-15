@@ -342,6 +342,40 @@ public abstract class Driver implements SQLExecutor
         public abstract List<Table> getTables(Session session);
 
         /**
+         * 获取视图列表。默认不支持（返回空），需要展示视图的数据库自行覆写。
+         *
+         * @param session 会话上下文，包含 catalog 和 schema 过滤条件
+         * @return 视图列表（可能为空，但不为 {@code null}）
+         */
+        public List<Table> getViews(Session session)
+        {
+                return Lists.emptyList();
+        }
+
+        /**
+         * 获取触发器列表。默认不支持（返回空），需要展示触发器的数据库自行覆写。
+         *
+         * @param session 会话上下文，包含 catalog 和 schema 过滤条件
+         * @return 触发器列表（可能为空，但不为 {@code null}）
+         */
+        public List<Table> getTriggers(Session session)
+        {
+                return Lists.emptyList();
+        }
+
+        /**
+         * 获取指定表的外键列表。默认不支持（返回空），需要展示外键的数据库自行覆写。
+         *
+         * @param session 会话上下文，包含 catalog 和 schema 过滤条件
+         * @param table   表名称
+         * @return 外键列表（可能为空，但不为 {@code null}）
+         */
+        public List<ForeignKey> getForeignKeys(Session session, String table)
+        {
+                return Lists.emptyList();
+        }
+
+        /**
          * 获取指定数据库表的列元信息列表。
          * <p>
          * 根据当前方言的实现，从数据库元数据中提取指定表的所有列的详细信息，

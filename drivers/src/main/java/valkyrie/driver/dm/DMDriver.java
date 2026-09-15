@@ -151,9 +151,9 @@ public class DMDriver extends Driver
                                                 pageSizeFetched = true;
                                         }
 
-                                        // 计算表大小（KB）
+                                        // 计算表大小（字节）
                                         long usedPages = rs.getLong("usedPages");
-                                        float sizeInKB = (usedPages * pageSize);
+                                        float sizeInBytes = (usedPages * pageSize);
 
                                         // 处理创建时间
                                         Timestamp createTimestamp = rs.getTimestamp("createTime");
@@ -164,7 +164,7 @@ public class DMDriver extends Driver
                                                 createDate,
                                                 null,
                                                 null,
-                                                sizeInKB,
+                                                sizeInBytes,
                                                 rs.getInt("rows"),
                                                 rs.getString("comment")
                                         ));

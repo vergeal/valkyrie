@@ -17,6 +17,7 @@ import valkyrie.driver.api.DbType;
 import valkyrie.driver.api.Dialect;
 import valkyrie.driver.api.Driver;
 import valkyrie.driver.api.DriverFactory;
+import valkyrie.driver.api.ForeignKey;
 import valkyrie.driver.api.GridRow;
 import valkyrie.driver.api.Index;
 import valkyrie.driver.api.QueryResult;
@@ -26,6 +27,11 @@ import valkyrie.driver.api.Table;
 import valkyrie.driver.api.VkDataSource;
 import valkyrie.driver.api.node.DBNode;
 import valkyrie.driver.api.node.DBCatalogNode;
+import valkyrie.driver.api.node.DBColumnNode;
+import valkyrie.driver.api.node.DBForeignKeyNode;
+import valkyrie.driver.api.node.DBIndexNode;
+import valkyrie.driver.api.node.DBObjectContainerNode;
+import valkyrie.driver.api.node.DBObjectNode;
 import valkyrie.driver.api.node.DBQueryContainerNode;
 import valkyrie.driver.api.node.DBSchemaNode;
 import valkyrie.driver.api.node.DBTableContainerNode;
@@ -1207,6 +1213,7 @@ public class RpcServer
                         case DBCatalogNode catalog -> catalog.getSession();
                         case DBSchemaNode schema -> schema.getSession();
                         case DBTableContainerNode container -> container.getSession();
+                        case DBObjectContainerNode container -> container.getSession();
                         default -> null;
                 };
 
@@ -1216,19 +1223,52 @@ public class RpcServer
                 }
 
                 if (node instanceof DBTableNode tableNode) {
-                        Table table = tableNode.getTable();
+                        json.put("table", tableMetaJson(tableNode.getTable()));
+                } else if (node instanceof DBObjectNode objectNode) {
+                        json.put("table", tableMetaJson(objectNode.getTable()));
+                } else if (node instanceof DBColumnNode columnNode) {
+                        Column column = columnNode.getColumn();
                         JSONObject meta = new JSONObject();
-                        meta.put("name", table.getName());
-                        meta.put("engine", table.getEngine());
-                        meta.put("rows", table.getRows());
-                        meta.put("size", table.getSize());
-                        meta.put("comment", table.getComment());
-                        meta.put("createTime", table.getCreateTime() == null ? null : table.getCreateTime().getTime());
-                        meta.put("updateTime", table.getUpdateTime() == null ? null : table.getUpdateTime().getTime());
-                        json.put("table", meta);
+                        meta.put("name", column.getName());
+                        meta.put("type", column.getType());
+                        meta.put("notNull", column.isNotNull());
+                        meta.put("primary", column.isPrimary());
+                        meta.put("autoIncrement", column.isAutoIncrement());
+                        meta.put("defaultValue", column.getDefaultValue());
+                        meta.put("comment", column.getComment());
+                        json.put("column", meta);
+                } else if (node instanceof DBIndexNode indexNode) {
+                        Index index = indexNode.getIndex();
+                        JSONObject meta = new JSONObject();
+                        meta.put("name", index.getName());
+                        meta.put("columnsText", index.getColumnsText());
+                        meta.put("type", index.getType());
+                        meta.put("visible", index.isVisible());
+                        json.put("index", meta);
+                } else if (node instanceof DBForeignKeyNode foreignKeyNode) {
+                        ForeignKey foreignKey = foreignKeyNode.getForeignKey();
+                        JSONObject meta = new JSONObject();
+                        meta.put("name", foreignKey.getName());
+                        meta.put("columnsText", foreignKey.getColumnsText());
+                        meta.put("refTable", foreignKey.getRefTable());
+                        meta.put("refColumnsText", foreignKey.getRefColumnsText());
+                        json.put("foreignKey", meta);
                 }
 
                 return json;
+        }
+
+        private JSONObject tableMetaJson(Table table)
+        {
+                JSONObject meta = new JSONObject();
+                meta.put("name", table.getName());
+                meta.put("engine", table.getEngine());
+                meta.put("rows", table.getRows());
+                meta.put("size", table.getSize());
+                meta.put("comment", table.getComment());
+                meta.put("createTime", table.getCreateTime() == null ? null : table.getCreateTime().getTime());
+                meta.put("updateTime", table.getUpdateTime() == null ? null : table.getUpdateTime().getTime());
+                return meta;
         }
 
         private JSONObject productJson(Driver driver)

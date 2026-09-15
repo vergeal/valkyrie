@@ -12,6 +12,11 @@ public enum DBNodeKind
         CATALOG("database1"),
         SCHEMA("schema"),
         TABLE("table"),
+        VIEW("view"),
+        TRIGGER("trigger"),
+        COLUMN("columns"),
+        INDEX("key"),
+        FOREIGN_KEY("link"),
         QUERY("sql"),
         ;
 

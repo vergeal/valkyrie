@@ -23,6 +23,7 @@ export interface TableMeta {
   name: string;
   engine?: string;
   rows?: number;
+  /** 数据大小（字节），展示时用 formatByteSize 换算 */
   size?: number;
   comment?: string;
   createTime?: number;
@@ -41,7 +42,34 @@ export interface ScriptFile {
   modified: number;
 }
 
-export type NodeKind = "ROOT" | "CONNECTION" | "CATALOG" | "SCHEMA" | "TABLE" | "QUERY";
+export type NodeKind = "ROOT" | "CONNECTION" | "CATALOG" | "SCHEMA" | "TABLE" | "VIEW" | "TRIGGER" | "COLUMN" | "INDEX" | "FOREIGN_KEY" | "QUERY";
+
+/** 表字段（「字段」分类下的子节点） */
+export interface ColumnMeta {
+  name: string;
+  type?: string;
+  notNull?: boolean;
+  primary?: boolean;
+  autoIncrement?: boolean;
+  defaultValue?: string;
+  comment?: string;
+}
+
+/** 表索引（「索引」分类下的子节点） */
+export interface IndexMeta {
+  name: string;
+  columnsText?: string;
+  type?: string;
+  visible?: boolean;
+}
+
+/** 表外键（「外键」分类下的子节点） */
+export interface ForeignKeyMeta {
+  name: string;
+  columnsText?: string;
+  refTable?: string;
+  refColumnsText?: string;
+}
 
 export interface SchemaNode {
   id: string;
@@ -52,6 +80,9 @@ export interface SchemaNode {
   catalog?: string;
   schema?: string;
   table?: TableMeta;
+  column?: ColumnMeta;
+  index?: IndexMeta;
+  foreignKey?: ForeignKeyMeta;
   connected?: boolean;
   badge?: string;
   /** 连接节点带上对应的数据库类型，用于显示品牌 logo */

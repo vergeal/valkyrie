@@ -1,4 +1,5 @@
 import type { ProductMeta, SchemaNode, TableColumn, TableIndex } from "../api";
+import { formatByteSize } from "../app/format";
 import { Icon } from "./icons";
 
 interface ObjectInfoProps {
@@ -9,16 +10,6 @@ interface ObjectInfoProps {
   indexes: TableIndex[];
   onOpenData: (node: SchemaNode) => void;
   onDesign: (node: SchemaNode) => void;
-}
-
-function formatSize(size?: number): string {
-  if (size == null)
-    return "-";
-
-  if (size < 1024)
-    return `${size.toFixed(1)} KB`;
-
-  return `${(size / 1024).toFixed(1)} MB`;
 }
 
 function formatTime(value?: number): string {
@@ -49,7 +40,7 @@ export function ObjectInfo(props: ObjectInfoProps) {
         {node.schema && <div className="prop-row"><span className="prop-key">模式</span><span className="prop-val mono">{node.schema}</span></div>}
         {node.table?.engine && <div className="prop-row"><span className="prop-key">引擎</span><span className="prop-val">{node.table.engine}</span></div>}
         {node.table?.rows != null && <div className="prop-row"><span className="prop-key">行数</span><span className="prop-val">{node.table.rows.toLocaleString()}</span></div>}
-        {node.table?.size != null && <div className="prop-row"><span className="prop-key">数据大小</span><span className="prop-val">{formatSize(node.table.size)}</span></div>}
+        {node.table?.size != null && <div className="prop-row"><span className="prop-key">数据大小</span><span className="prop-val">{formatByteSize(node.table.size)}</span></div>}
         {isTable && <div className="prop-row"><span className="prop-key">创建时间</span><span className="prop-val">{formatTime(node.table?.createTime)}</span></div>}
         {isTable && <div className="prop-row"><span className="prop-key">更新时间</span><span className="prop-val">{formatTime(node.table?.updateTime)}</span></div>}
         {node.table?.comment && <div className="prop-row"><span className="prop-key">注释</span><span className="prop-val">{node.table.comment}</span></div>}

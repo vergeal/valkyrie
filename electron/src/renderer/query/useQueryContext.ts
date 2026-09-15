@@ -146,13 +146,13 @@ export function useQueryContext(deps: QueryContextDeps) {
       setSchemaOptions(schemas);
 
       /* MySQL 这类没有模式层级：表直接挂在数据库下的「数据表」容器里 */
-      const container = children.find(node => node.kind === "TABLE" && node.hasChildren);
+      const container = children.find(node => node.kind === "TABLE" && node.hasChildren && !node.table);
 
       if (schemas.length === 0 && container) {
         const tables = await loadChildren(session.sessionId, container);
 
         if (!cancelled)
-          setTableNodes(tables.filter(node => node.kind === "TABLE" && !node.hasChildren));
+          setTableNodes(tables.filter(node => node.kind === "TABLE" && Boolean(node.table)));
       } else if (!cancelled) {
         setTableNodes([]);
       }
@@ -182,7 +182,7 @@ export function useQueryContext(deps: QueryContextDeps) {
       if (cancelled)
         return;
 
-      const container = children.find(node => node.kind === "TABLE" && node.hasChildren);
+      const container = children.find(node => node.kind === "TABLE" && node.hasChildren && !node.table);
 
       if (!container) {
         setTableNodes([]);
@@ -192,7 +192,7 @@ export function useQueryContext(deps: QueryContextDeps) {
       const tables = await loadChildren(session.sessionId, container);
 
       if (!cancelled)
-        setTableNodes(tables.filter(node => node.kind === "TABLE" && !node.hasChildren));
+        setTableNodes(tables.filter(node => node.kind === "TABLE" && Boolean(node.table)));
     })();
 
     return () => {

@@ -127,7 +127,7 @@ export function useObjectPage(deps: UseObjectPageDeps) {
 
     /* 选中的是表 → 展示它所在的容器，并把这个表标为当前项 */
     let target = start;
-    const highlight = start.kind === "TABLE" && !start.hasChildren ? start.label : null;
+    const highlight = start.kind === "TABLE" && start.table ? start.label : null;
 
     if (highlight) {
       const parent = parentTreeNode(start.id);

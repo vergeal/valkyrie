@@ -23,7 +23,9 @@ public class MySQLMetadataProvider implements DBMetadataProvider
         public List<DBNode> getChildrenOfCatalog(DBCatalogNode catalogNode)
         {
                 return Lists.of(
-                        new DBTableContainerNode(catalogNode, driver::getTables),
+                        new DBTableContainerNode(catalogNode, driver),
+                        new DBObjectContainerNode(catalogNode, "视图", DBNodeKind.VIEW, DBNodeKind.VIEW, driver::getViews),
+                        new DBObjectContainerNode(catalogNode, "触发器", DBNodeKind.TRIGGER, DBNodeKind.TRIGGER, driver::getTriggers),
                         new DBQueryContainerNode(catalogNode)
                 );
         }

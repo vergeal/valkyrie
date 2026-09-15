@@ -506,6 +506,11 @@ input, textarea, .console, .pre-wrap { user-select: text; }
 .tree-icon.kind-catalog { color: light-dark(#2563eb, #58a6ff); }
 .tree-icon.kind-schema { color: light-dark(#6d28d9, #a371f7); }
 .tree-icon.kind-table { color: light-dark(#1d4ed8, #79c0ff); }
+.tree-icon.kind-view { color: light-dark(#0d9488, #2dd4bf); }
+.tree-icon.kind-trigger { color: light-dark(#b45309, #f59e0b); }
+.tree-icon.kind-column { color: light-dark(#0d9488, #2dd4bf); }
+.tree-icon.kind-index { color: light-dark(#b45309, #f59e0b); }
+.tree-icon.kind-foreign_key { color: light-dark(#0891b2, #38bdf8); }
 /* 查询脚本容器（kind-query）与脚本文件用同一档绿色 */
 .tree-icon.kind-query { color: light-dark(#15803d, #3fb950); }
 .tree-icon.is-script { color: light-dark(#15803d, #3fb950); }
@@ -523,6 +528,17 @@ input, textarea, .console, .pre-wrap { user-select: text; }
 
 .app.is-dark { --logo-filter: brightness(1.35) saturate(1.12); }
 .tree-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+/* 明细叶子的补充说明：字段类型 / 索引字段 / 外键引用，靠右弱化显示 */
+.tree-detail {
+  flex: 0 1 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+  opacity: .85;
+}
 .tree-count {
   font-size: 11px;
   color: var(--muted);

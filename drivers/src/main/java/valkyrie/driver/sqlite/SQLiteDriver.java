@@ -148,7 +148,7 @@ public class SQLiteDriver extends Driver
         }
 
         /**
-         * 表大小（KB）：SQLite 没有现成元数据，dbstat 虚表可用时按页统计。
+         * 表大小（字节）：SQLite 没有现成元数据，dbstat 虚表可用时按页统计。
          */
         private static Float tableSize(Connection connection, String table)
         {
@@ -159,7 +159,7 @@ public class SQLiteDriver extends Driver
                                 return null;
 
                         long bytes = rs.getLong(1);
-                        return bytes > 0 ? bytes / 1024f : null;
+                        return bytes > 0 ? (float) bytes : null;
                 } catch (SQLException e) {
                         return null;
                 }

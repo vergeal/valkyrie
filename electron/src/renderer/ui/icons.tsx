@@ -25,6 +25,7 @@ import {
   Info,
   KeyRound,
   Layers,
+  Link,
   List,
   Locate,
   Lock,
@@ -47,7 +48,8 @@ import {
   Trash2,
   TriangleAlert,
   User,
-  X
+  X,
+  Zap
 } from "lucide-react";
 import type { ComponentType } from "react";
 
@@ -94,6 +96,7 @@ const ICONS: Record<string, ComponentType<{ size?: number; className?: string; s
   search: Search,
   columns: Columns3,
   key: KeyRound,
+  link: Link,
   download: Download,
   check: Check,
   close: X,
@@ -124,6 +127,7 @@ const ICONS: Record<string, ComponentType<{ size?: number; className?: string; s
   lock: Lock,
   eye: Eye,
   eyeOff: EyeOff,
+  zap: Zap,
   file: FileText,
   save: Save,
   pencil: Pencil,
@@ -173,6 +177,7 @@ export const ICON_COLORS: Record<string, string> = {
   folder: "#d97706",
   folderOpen: "#d97706",
   key: "#d97706",
+  link: "#0891b2",
   lock: "#d97706",
   sun: "#d97706",
   eraser: "#ea580c",
@@ -181,7 +186,9 @@ export const ICON_COLORS: Record<string, string> = {
   csv: "#0d9488",
   calendar: "#2563eb",
   calendarClock: "#2563eb",
-  clock: "#2563eb"
+  clock: "#2563eb",
+  eye: "#0891b2",
+  zap: "#d97706"
 };
 
 interface IconProps {

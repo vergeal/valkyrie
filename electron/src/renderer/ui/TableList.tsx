@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { SchemaNode } from "../api";
+import { formatByteSize } from "../app/format";
 import { Icon } from "./icons";
 
 type SortKey = "name" | "rows" | "size" | "engine" | "comment" | "createTime" | "updateTime";
@@ -28,16 +29,6 @@ const COLUMNS: { key: SortKey; label: string; className?: string }[] = [
   { key: "updateTime", label: "修改日期" },
   { key: "createTime", label: "创建日期" }
 ];
-
-function formatSize(size?: number): string {
-  if (size == null)
-    return "-";
-
-  if (size < 1024)
-    return `${size.toFixed(1)} KB`;
-
-  return `${(size / 1024).toFixed(1)} MB`;
-}
 
 function formatTime(value?: number): string {
   if (!value)
@@ -210,7 +201,7 @@ export function TableList(props: TableListProps) {
                 <span className="table-name-text">{node.label}</span>
               </td>
               <td className="is-num">{node.table?.rows != null ? node.table.rows.toLocaleString() : "-"}</td>
-              <td className="is-num">{formatSize(node.table?.size)}</td>
+              <td className="is-num">{formatByteSize(node.table?.size)}</td>
               <td>{node.table?.engine || "-"}</td>
               <td className="table-comment" title={node.table?.comment ?? ""}>{node.table?.comment || "-"}</td>
               {/* 顺序与 COLUMNS 一致：修改日期在创建日期之前 */}

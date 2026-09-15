@@ -172,7 +172,7 @@ public class MySQLDriver extends Driver
                             FROM
                             	information_schema.TABLES
                             WHERE
-                            	TABLE_SCHEMA = '%s';
+                            	TABLE_SCHEMA = '%s' AND TABLE_TYPE = 'BASE TABLE';
                         """, session.catalog());
 
                         try (var rs = statement.executeQuery(sql)) {
@@ -193,6 +193,117 @@ public class MySQLDriver extends Driver
                 }
 
                 return tables;
+        }
+
+        @Override
+        public List<Table> getViews(Session session)
+        {
+                List<Table> views = Lists.newArrayList();
+
+                try (Connection connection = getConnection(session);
+                     Statement statement = connection.createStatement()) {
+                        String sql = fmt("""
+                            SELECT
+                            	`TABLE_NAME` AS `name`,
+                            	`TABLE_COMMENT` AS `comment`
+                            FROM
+                            	information_schema.TABLES
+                            WHERE
+                            	TABLE_SCHEMA = '%s' AND TABLE_TYPE = 'VIEW';
+                        """, session.catalog());
+
+                        try (var rs = statement.executeQuery(sql)) {
+                                while (rs.next()) {
+                                        Table view = new Table(rs.getString("name"));
+                                        view.setComment(rs.getString("comment"));
+                                        views.add(view);
+                                }
+                        }
+                } catch (SQLException e) {
+                        throw new DriverException(e);
+                }
+
+                return views;
+        }
+
+        @Override
+        public List<Table> getTriggers(Session session)
+        {
+                List<Table> triggers = Lists.newArrayList();
+
+                try (Connection connection = getConnection(session);
+                     Statement statement = connection.createStatement()) {
+                        String sql = fmt("""
+                            SELECT
+                            	`TRIGGER_NAME` AS `name`,
+                            	`CREATED` AS `createTime`,
+                            	`ACTION_TIMING` AS `timing`,
+                            	`EVENT_MANIPULATION` AS `event`,
+                            	`EVENT_OBJECT_TABLE` AS `table`
+                            FROM
+                            	information_schema.TRIGGERS
+                            WHERE
+                            	TRIGGER_SCHEMA = '%s';
+                        """, session.catalog());
+
+                        try (var rs = statement.executeQuery(sql)) {
+                                while (rs.next()) {
+                                        Table trigger = new Table(rs.getString("name"));
+                                        trigger.setCreateTime(rs.getTimestamp("createTime"));
+                                        trigger.setComment(fmt("%s %s ON %s",
+                                                rs.getString("timing"), rs.getString("event"), rs.getString("table")));
+                                        triggers.add(trigger);
+                                }
+                        }
+                } catch (SQLException e) {
+                        throw new DriverException(e);
+                }
+
+                return triggers;
+        }
+
+        @Override
+        public List<ForeignKey> getForeignKeys(Session session, String table)
+        {
+                Map<String, ForeignKey> keys = new LinkedHashMap<>();
+
+                String sql = fmt("""
+                    SELECT
+                    	`CONSTRAINT_NAME` AS `name`,
+                    	`COLUMN_NAME` AS `column`,
+                    	`REFERENCED_TABLE_NAME` AS `refTable`,
+                    	`REFERENCED_COLUMN_NAME` AS `refColumn`
+                    FROM
+                    	information_schema.KEY_COLUMN_USAGE
+                    WHERE
+                    	`TABLE_SCHEMA` = '%s' AND `TABLE_NAME` = '%s'
+                    	AND `REFERENCED_TABLE_NAME` IS NOT NULL
+                    ORDER BY
+                    	`CONSTRAINT_NAME`, `ORDINAL_POSITION`;
+                """, session.catalog(), table.replace("'", "''"));
+
+                try (Connection connection = getConnection(session);
+                     Statement statement = connection.createStatement();
+                     var rs = statement.executeQuery(sql)) {
+                        while (rs.next()) {
+                                String name = rs.getString("name");
+                                ForeignKey key = keys.computeIfAbsent(name, k -> {
+                                        ForeignKey created = new ForeignKey();
+                                        created.setName(k);
+                                        created.setColumns(new ArrayList<>());
+                                        created.setRefColumns(new ArrayList<>());
+                                        return created;
+                                });
+
+                                key.getColumns().add(rs.getString("column"));
+                                key.setRefTable(rs.getString("refTable"));
+                                key.getRefColumns().add(rs.getString("refColumn"));
+                        }
+                } catch (SQLException e) {
+                        throw new DriverException(e);
+                }
+
+                return Lists.newArrayList(keys.values());
         }
 
         @Override

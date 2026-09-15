@@ -124,7 +124,11 @@ export function useSchemaActions(deps: SchemaActionsDeps) {
 
   /* 双击对象：连接 / 展开 / 打开数据 */
   function activateNode(node: SchemaNode) {
-    if (node.kind === "TABLE" && !node.hasChildren && node.table) {
+    /*
+     * 表双击固定「打开数据」，不展开 —— 展开只能点行首的三角，
+     * 否则双击打开数据的操作会被误当成展开，用起来很别扭。
+     */
+    if (node.kind === "TABLE" && node.table) {
       openTableData(node);
       return;
     }

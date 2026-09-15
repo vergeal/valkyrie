@@ -91,8 +91,9 @@ export function newConnectionMenuEntries(ctx: MenuContext): MenuEntry[] {
 
 /* 右键菜单：与 JavaFX 版本保持一致 */
 export function buildContextMenu(node: SchemaNode, ctx: MenuContext): MenuEntry[] {
-  const container = node.kind === "TABLE" && node.hasChildren;
-  const isTable = node.kind === "TABLE" && !node.hasChildren && Boolean(node.table);
+  /* 「数据表」容器与真正的表节点同为 TABLE，用有没有表元数据区分 */
+  const container = node.kind === "TABLE" && node.hasChildren && !node.table;
+  const isTable = node.kind === "TABLE" && Boolean(node.table);
   const open = ctx.expanded.has(node.id);
 
   if (node.kind === "ROOT") {
@@ -192,6 +193,40 @@ export function buildContextMenu(node: SchemaNode, ctx: MenuContext): MenuEntry[
       { label: "新建表…", action: () => void ctx.createTableDraft(node.catalog) },
       { label: "刷新列表", action: () => void ctx.refreshObjectList(node) },
       { label: "新建查询", action: ctx.createQueryTab }
+    ];
+  }
+
+  /* 视图 / 触发器容器：与「数据表」容器同类，只是对象种类不同 */
+  if ((node.kind === "VIEW" || node.kind === "TRIGGER") && node.hasChildren) {
+    return [
+      { label: open ? "收起列表" : "展开列表", action: () => void ctx.toggleNode(node) },
+      { label: "刷新列表", action: () => void ctx.refreshNode(node) }
+    ];
+  }
+
+  if (node.kind === "VIEW") {
+    return [
+      { label: "复制视图名", action: () => void ctx.copyText(node.label) },
+      { label: "复制查询语句", action: () => void ctx.copyText(`SELECT * FROM ${node.label};`) }
+    ];
+  }
+
+  if (node.kind === "TRIGGER") {
+    return [
+      { label: "复制触发器名", action: () => void ctx.copyText(node.label) }
+    ];
+  }
+
+  /* 表下的「字段 / 索引 / 外键」分类与明细 */
+  if (node.kind === "COLUMN" || node.kind === "INDEX" || node.kind === "FOREIGN_KEY") {
+    if (node.hasChildren)
+      return [
+        { label: open ? "收起列表" : "展开列表", action: () => void ctx.toggleNode(node) },
+        { label: "刷新列表", action: () => void ctx.refreshNode(node) }
+      ];
+
+    return [
+      { label: "复制名称", action: () => void ctx.copyText(node.label) }
     ];
   }
 

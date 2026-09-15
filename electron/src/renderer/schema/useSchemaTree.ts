@@ -197,7 +197,7 @@ export function useSchemaTree(deps: SchemaTreeDeps) {
 
     const children = await loadChildren(id, container, force);
 
-    return children.filter(node => node.kind === "TABLE" && !node.hasChildren);
+    return children.filter(node => node.kind === "TABLE" && Boolean(node.table));
   }
 
   /**
@@ -207,20 +207,21 @@ export function useSchemaTree(deps: SchemaTreeDeps) {
    * - 库下面还隔着模式的（PostgreSQL）→ 优先 public，其次是第一个非系统模式。
    */
   async function firstTableContainer(sessionId: string, node: SchemaNode): Promise<SchemaNode | null> {
-    if (node.kind === "TABLE" && node.hasChildren)
+    /* 「数据表」容器：kind 同为 TABLE 但没有表元数据；真正的表节点带 node.table */
+    if (node.kind === "TABLE" && node.hasChildren && !node.table)
       return node;
 
     if (node.kind === "TABLE") {
       const parent = parentTreeNode(node.id);
 
-      return parent && parent.kind === "TABLE" && parent.hasChildren ? parent : null;
+      return parent && parent.kind === "TABLE" && parent.hasChildren && !parent.table ? parent : null;
     }
 
     if (node.kind !== "CATALOG" && node.kind !== "SCHEMA")
       return null;
 
     const children = await loadChildren(sessionId, node);
-    const direct = children.find(child => child.kind === "TABLE" && child.hasChildren);
+    const direct = children.find(child => child.kind === "TABLE" && child.hasChildren && !child.table);
 
     if (direct)
       return direct;
@@ -231,7 +232,7 @@ export function useSchemaTree(deps: SchemaTreeDeps) {
 
     for (const schema of schemas) {
       const container = (await loadChildren(sessionId, schema))
-        .find(child => child.kind === "TABLE" && child.hasChildren);
+        .find(child => child.kind === "TABLE" && child.hasChildren && !child.table);
 
       if (container)
         return container;
@@ -300,25 +301,25 @@ export function useSchemaTree(deps: SchemaTreeDeps) {
    * 表容器 → 自己；表 → 父容器；库 / 模式 → 底下的容器（库还要再往下走一层模式）。
    */
   async function containerCandidates(sessionId: string, node: SchemaNode): Promise<SchemaNode[]> {
-    if (node.kind === "TABLE" && node.hasChildren)
+    if (node.kind === "TABLE" && node.hasChildren && !node.table)
       return [node];
 
     if (node.kind === "TABLE") {
       const parent = parentTreeNode(node.id);
 
-      return parent && parent.kind === "TABLE" && parent.hasChildren ? [parent] : [];
+      return parent && parent.kind === "TABLE" && parent.hasChildren && !parent.table ? [parent] : [];
     }
 
     if (node.kind !== "CATALOG" && node.kind !== "SCHEMA")
       return [];
 
     const children = await loadChildren(sessionId, node, true);
-    const direct = children.find(child => child.kind === "TABLE" && child.hasChildren);
+    const direct = children.find(child => child.kind === "TABLE" && child.hasChildren && !child.table);
     const found = direct ? [direct] : [];
 
     for (const schema of children.filter(child => child.kind === "SCHEMA")) {
       const grand = await loadChildren(sessionId, schema, true);
-      const container = grand.find(child => child.kind === "TABLE" && child.hasChildren);
+      const container = grand.find(child => child.kind === "TABLE" && child.hasChildren && !child.table);
 
       if (container)
         found.push(container);

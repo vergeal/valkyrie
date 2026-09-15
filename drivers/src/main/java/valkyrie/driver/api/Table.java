@@ -50,7 +50,7 @@ public class Table
         private String engine;
 
         /**
-         * 数据库大小（KB）
+         * 数据大小（字节）
          */
         private Float size;
 

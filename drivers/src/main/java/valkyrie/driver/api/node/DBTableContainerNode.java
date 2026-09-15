@@ -1,6 +1,7 @@
 package valkyrie.driver.api.node;
 
 import lombok.Getter;
+import valkyrie.driver.api.Driver;
 import valkyrie.driver.api.Session;
 import valkyrie.driver.api.Table;
 import valkyrie.utils.collection.Lists;
@@ -14,18 +15,14 @@ import java.util.List;
  */
 public class DBTableContainerNode extends DBNode
 {
-        private final TableLoader tableLoader;
+        private final @Getter Driver driver;
         private final List<Table> tables = new ArrayList<>();
         private final @Getter Session session;
 
-        public interface TableLoader {
-                List<Table> load(Session session);
-        }
-
-        public DBTableContainerNode(DBNode parent, TableLoader tableLoader)
+        public DBTableContainerNode(DBNode parent, Driver driver)
         {
                 super(parent, "数据表", DBNodeKind.TABLE, null);
-                this.tableLoader = tableLoader;
+                this.driver = driver;
 
                 session = switch (parent) {
                         case DBCatalogNode catalogNode -> catalogNode.getSession();
@@ -45,7 +42,7 @@ public class DBTableContainerNode extends DBNode
         {
                 /* schema.children 在服务端线程池里并发执行，同一个容器节点会被多条请求同时命中；
                    这里必须在同一步里清空并填充，否则交叉执行会让一份结果里出现重复的表节点 */
-                List<Table> loaded = tableLoader.load(session);
+                List<Table> loaded = driver.getTables(session);
 
                 tables.clear();
                 tables.addAll(loaded);

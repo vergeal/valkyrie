@@ -104,7 +104,8 @@ export function affectsTabOnNodeClose(tab: WorkTab, node: SchemaNode): boolean {
   if (node.kind === "SCHEMA")
     return target.catalog === node.catalog && target.schema === node.label;
 
-  if (node.kind === "TABLE" && node.hasChildren)
+  /* 「数据表」容器：没有表元数据，关闭它带走该容器下全部数据页 */
+  if (node.kind === "TABLE" && node.hasChildren && !node.table)
     return target.catalog === node.catalog && target.schema === node.schema;
 
   if (node.kind === "TABLE")
