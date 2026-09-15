@@ -42,6 +42,8 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
 
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const suppressChange = useRef(false);
+  /* 内容是在容器还不可见（0 高 / 收起）时写入的 → 需要等展开后补一次分词 */
+  const needsRetokenize = useRef(false);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const onContentChangeRef = useRef(onContentChange);
@@ -218,9 +220,44 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyW, () =>
       editor.trigger("keyboard", "editor.action.smartSelect.shrink", null));
 
+    /*
+     * 容器从 0 高 / 收起切到可见时补一次分词：
+     * Monaco 按「写入内容那一刻的可见范围」分词，若那时容器只有几像素高，
+     * 之后 automaticLayout 只会重排视口，不会补分词，整段 SQL 就一直是默认色，
+     * 非要滚动或重新输入才恢复。等容器长起来后按可见行强制分词即可。
+     */
+    let retokenizeRaf = 0;
+    const containerObserver = new ResizeObserver(() => {
+      const model = editor.getModel();
+
+      if (!needsRetokenize.current || !model || container.clientHeight === 0)
+        return;
+
+      needsRetokenize.current = false;
+      /* 等 automaticLayout 先把视口摆到位，再按可见范围分词 */
+      retokenizeRaf = requestAnimationFrame(() => {
+        if (model.isDisposed())
+          return;
+
+        const ranges = editor.getVisibleRanges();
+        const lastLine = ranges.length > 0 ? ranges[ranges.length - 1].endLineNumber : model.getLineCount();
+
+        /*
+         * ITextModel 的公开类型没有暴露 tokenization；强制分词只有这一个入口，
+         * Monaco 0.52 内部（TextModel.tokenization）就是靠它补齐懒分词。
+         */
+        (model as monaco.editor.ITextModel & {
+          tokenization: { forceTokenization: (lineNumber: number) => void };
+        }).tokenization.forceTokenization(lastLine);
+      });
+    });
+
+    containerObserver.observe(container);
     editorRef.current = editor;
 
     return () => {
+      cancelAnimationFrame(retokenizeRaf);
+      containerObserver.disconnect();
       completionProvider.dispose();
       editor.dispose();
       editorRef.current = null;
@@ -294,6 +331,11 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
       suppressChange.current = true;
       editor.setValue(sql);
       suppressChange.current = false;
+      /*
+       * setValue 时容器若还是 0 高 / 收起，Monaco 只按当时的可见行分词；
+       * 交给 ResizeObserver 在容器展开后补分词（见上面的 containerObserver）。
+       */
+      needsRetokenize.current = true;
     }
 
     if (activeTab?.kind === "query")
