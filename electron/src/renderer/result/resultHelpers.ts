@@ -29,6 +29,34 @@ export const selectionCols = (selection: GridSelection) =>
     : Array.from({ length: selection.c2 - selection.c1 + 1 }, (_, index) => selection.c1 + index);
 
 /**
+ * 全表搜索的行匹配：忽略大小写、纯子串（与 ResultGrid 内的过滤规则同源）。
+ * keyword 传进来前会 trim + 小写。
+ */
+export function rowMatchesKeyword(row: (string | null)[], keyword: string): boolean {
+  if (!keyword)
+    return true;
+
+  return row.some(cell => cell !== null && String(cell).toLowerCase().includes(keyword));
+}
+
+/** 全表搜索命中的行下标（关键字为空时视为全部可见） */
+export function visibleRowIndices(rows: (string | null)[][], keyword: string): number[] {
+  const lower = keyword.trim().toLowerCase();
+
+  if (!lower)
+    return rows.map((_, index) => index);
+
+  const indices: number[] = [];
+
+  rows.forEach((row, index) => {
+    if (rowMatchesKeyword(row, lower))
+      indices.push(index);
+  });
+
+  return indices;
+}
+
+/**
  * 复制结果表选区为「制表符分隔」（Excel / WPS / 云表格直接粘）。
  *
  * 格子里出现制表符 / 换行 / 双引号时按 Excel 的惯例用双引号包起来（内部引号翻倍），
@@ -75,6 +103,11 @@ export function resolveDirtyRows(method: string, params: Record<string, unknown>
   }
 
   if (method === "result.setNull") {
+    const rows = Array.isArray(params.rows) ? params.rows.map(Number) : [];
+    return [...new Set([...current, ...rows])];
+  }
+
+  if (method === "result.replace") {
     const rows = Array.isArray(params.rows) ? params.rows.map(Number) : [];
     return [...new Set([...current, ...rows])];
   }

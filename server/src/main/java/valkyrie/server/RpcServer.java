@@ -171,6 +171,7 @@ public class RpcServer
                         case "result.insert" -> insertRow(params);
                         case "result.delete" -> deleteRows(params);
                         case "result.setNull" -> setNull(params);
+                        case "result.replace" -> replaceValues(params);
                         case "result.commit" -> commitResult(params);
                         case "result.rollback" -> rollbackResult(params);
                         case "result.reload" -> reloadResult(params);
@@ -1395,6 +1396,25 @@ public class RpcServer
                 }
 
                 return resultJson(params.getLongValue("jobId"), result);
+        }
+
+        /**
+         * 全表搜索的全局替换：只在传进来的行里做不区别大小写的文本替换，
+         * 结果只记进待提交缓冲（点「提交修改」才写库，中途可以「回滚」）。
+         */
+        private Object replaceValues(JSONObject params)
+        {
+                QueryResult result = requireResult(params);
+
+                int replaced = result.replaceValues(
+                        toIntArray(params.getJSONArray("rows")),
+                        params.getString("find"),
+                        params.containsKey("replace") ? params.getString("replace") : "");
+
+                JSONObject ret = resultJson(params.getLongValue("jobId"), result);
+                /* 实际改动的单元格数：前端据此显示提示与累计未提交改动 */
+                ret.put("replaced", replaced);
+                return ret;
         }
 
         private Object insertRow(JSONObject params)

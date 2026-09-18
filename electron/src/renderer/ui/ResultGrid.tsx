@@ -9,6 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { isNumericType, type QueryColumn } from "../api";
+import { rowMatchesKeyword } from "../result/resultHelpers";
 import { KEY } from "../keys";
 import { DateTimePicker } from "./DateTimePicker";
 import { JsonTextArea } from "./JsonTextArea";
@@ -464,7 +465,8 @@ export function ResultGrid(props: ResultGridProps) {
     const list: { row: (string | null)[]; index: number }[] = [];
 
     rows.forEach((row, index) => {
-      if (row.some(cell => cell !== null && String(cell).toLowerCase().includes(keyword)))
+      /* 与全局替换共用同一套「可见行」判定，避免过滤范围不一致 */
+      if (rowMatchesKeyword(row, keyword))
         list.push({ row, index });
     });
 

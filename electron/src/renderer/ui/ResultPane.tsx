@@ -27,6 +27,10 @@ export function ResultPane(props: {
   resultActions: Record<string, ResultAction>;
   gridSearch: string;
   setGridSearch: (value: string) => void;
+  gridReplace: string;
+  setGridReplace: (value: string) => void;
+  gridReplaceOpen: boolean;
+  setGridReplaceOpen: (value: boolean) => void;
   searchingGrid: boolean;
   gridHits: number | null;
   gridKeyword: string;
@@ -61,7 +65,8 @@ export function ResultPane(props: {
   const {
     tabsEmpty, pageTab, resultPane, setResultPane, activeTab, rows, columns, lastCost,
     currentResult, pending, settings, resultActions,
-    gridSearch, setGridSearch, searchingGrid, gridHits, gridKeyword, gridFlash,
+    gridSearch, setGridSearch, gridReplace, setGridReplace, gridReplaceOpen, setGridReplaceOpen,
+    searchingGrid, gridHits, gridKeyword, gridFlash,
     setGridHits, setGridSelection, onCellCommit, onExport, onExplain, onGridContextMenu,
     tableFilter, listFlash, tableSelection, setTableSelection, setActiveNode, onOpenTable, onTableContextMenu,
     scriptFilter, scriptFlash, scriptSelection, setScriptSelection, onOpenScript, onScriptContextMenu,
@@ -168,11 +173,50 @@ export function ResultPane(props: {
                   setGridSearch("");
               }}
             />
+            {/* 替换默认收起，点这个箭头才展开 */}
+            <button
+              type="button"
+              className={`search-toggle${gridReplaceOpen ? " is-active" : ""}`}
+              title={gridReplaceOpen ? "收起替换" : "展开替换"}
+              aria-label={gridReplaceOpen ? "收起替换" : "展开替换"}
+              aria-expanded={gridReplaceOpen}
+              onClick={() => setGridReplaceOpen(!gridReplaceOpen)}
+            >
+              <Icon name={gridReplaceOpen ? "chevronDown" : "chevronRight"} size={13} />
+            </button>
           </span>
           {searchingGrid && (
             <span className="toolbar-text">
               命中 {gridHits ?? 0} / {rows.length} 行
             </span>
+          )}
+          {/* 全局替换：把命中行里包含关键字的单元格批量替换，点「提交修改」才写库 */}
+          {gridReplaceOpen && (
+            <>
+              <span className="toolbar-search">
+                <input
+                  type="text"
+                  value={gridReplace}
+                  placeholder="替换为…"
+                  aria-label="替换当前结果集的匹配内容"
+                  onChange={event => setGridReplace(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === "Enter")
+                      resultActions.replace.run();
+                    else if (event.key === "Escape")
+                      setGridReplace("");
+                  }}
+                />
+              </span>
+              <button
+                type="button"
+                className={`tbtn${pending === "result.replace" ? " is-busy" : ""}`}
+                disabled={resultActions.replace.disabled}
+                onClick={resultActions.replace.run}
+              >
+                全部替换
+              </button>
+            </>
           )}
           <span className="toolbar-text">
             {currentResult.editable ? "可编辑" : "只读"}{searchingGrid ? " · 改动只作用于可见行" : ""}

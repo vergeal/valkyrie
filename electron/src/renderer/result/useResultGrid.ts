@@ -9,6 +9,7 @@ import {
   selectionCols,
   selectionRows,
   sqlLiteral,
+  visibleRowIndices,
   type GridSelection
 } from "./resultHelpers";
 
@@ -47,6 +48,10 @@ export function useResultGrid(options: UseResultGridOptions) {
   /* 结果集全表搜索：输入值 / 防抖后的关键字（同 FX 版，停顿一下再过滤） */
   const [gridSearch, setGridSearch] = useState("");
   const [gridKeyword, setGridKeyword] = useState("");
+  /* 全局替换：替换成的文本（配合搜索关键字在可见行里批量替换） */
+  const [gridReplace, setGridReplace] = useState("");
+  /* 替换行默认收起，点搜索框里的展开按钮才出现 */
+  const [gridReplaceOpen, setGridReplaceOpen] = useState(false);
   /* 命中行数（null = 未搜索），显示在结果集工具条上 */
   const [gridHits, setGridHits] = useState<number | null>(null);
   /* 刷新反馈：不弹提示，改成表格闪一下（计数变化即触发动画） */
@@ -68,6 +73,8 @@ export function useResultGrid(options: UseResultGridOptions) {
   useEffect(() => {
     setGridSearch("");
     setGridKeyword("");
+    setGridReplace("");
+    setGridReplaceOpen(false);
   }, [activeTabId]);
 
   /*
@@ -104,24 +111,31 @@ export function useResultGrid(options: UseResultGridOptions) {
 
       /* 累计/清零本次未提交的改动条数 */
       const rowParams = Array.isArray(params.rows) ? params.rows.length : 0;
+      const replaced = typeof payload.replaced === "number" ? payload.replaced : 0;
       const delta = method === "result.update" || method === "result.insert"
         ? 1
         : method === "result.delete" || method === "result.setNull"
           ? rowParams
-          : 0;
+          : method === "result.replace"
+            ? replaced
+            : 0;
       const clearsPending = method === "result.commit" || method === "result.rollback" || method === "result.reload";
 
       updateTab(tabId, {
         result: { ...payload, offset, size },
-        /* 记录哪些行有未提交修改，用于行高亮 */
-        dirtyRows: resolveDirtyRows(method, params, activeTab.dirtyRows),
+        /* 记录哪些行有未提交修改，用于行高亮（一处都没替换到就不动标记） */
+        dirtyRows: method === "result.replace" && replaced === 0
+          ? activeTab.dirtyRows
+          : resolveDirtyRows(method, params, activeTab.dirtyRows),
         pending: clearsPending ? 0 : pendingBefore + delta
       });
 
-      /* 提交时把改动条数报出来 */
+      /* 提交时把改动条数报出来；替换时把实际改动的单元格数报出来 */
       const message = method === "result.commit"
         ? `已提交 ${pendingBefore} 条修改`
-        : success;
+        : method === "result.replace"
+          ? `已替换 ${replaced} 处（未提交）`
+          : success;
 
       if (message) {
         setStatus(message);
@@ -173,6 +187,30 @@ export function useResultGrid(options: UseResultGridOptions) {
   }
 
   /**
+   * 全局替换：在搜索结果命中的行里，把包含关键字的单元格批量替换成「替换为」的文本。
+   * 只记进待提交缓冲，点「提交修改」才写库，中途可以「回滚」。
+   */
+  async function replaceGridValues() {
+    if (!currentResult?.editable)
+      return;
+
+    const keyword = gridKeyword.trim();
+    const rows = currentResult.rows ?? [];
+
+    if (!keyword || rows.length === 0)
+      return;
+
+    const targets = visibleRowIndices(rows, keyword);
+
+    if (targets.length === 0) {
+      setStatus("没有可替换的匹配数据");
+      return;
+    }
+
+    await runResultAction("result.replace", { rows: targets, find: keyword, replace: gridReplace });
+  }
+
+  /**
    * 提交修改：这一步才真正写库（尤其待删除的行会真的从表里消失），必须确认。
    */
   async function commitResultChanges() {
@@ -197,20 +235,12 @@ export function useResultGrid(options: UseResultGridOptions) {
       await runResultAction("result.commit", {}, "修改已提交");
   }
 
-  /** 回滚：丢掉这次所有未提交改动（改动本身会消失，先确认一次） */
+  /** 回滚：丢掉这次所有未提交改动（不弹确认，直接还原） */
   async function rollbackResultChanges() {
     if (!currentResult?.dirty)
       return;
 
-    const pending = pendingChangeCount();
-    const confirmed = await askConfirm(
-      `确定放弃这 ${pending} 处未提交改动？\n\n数据会恢复成数据库里的原始内容，改动无法找回。`,
-      "回滚修改",
-      true
-    );
-
-    if (confirmed)
-      await runResultAction("result.rollback", {}, "已回滚未提交的修改");
+    await runResultAction("result.rollback", {}, "已回滚未提交的修改");
   }
 
   async function copyRows(format: "json" | "insert" | "update") {
@@ -300,6 +330,11 @@ export function useResultGrid(options: UseResultGridOptions) {
       disabled: !currentResult?.editable || !gridSelection,
       run: () => void setSelectionNull()
     },
+    replace: {
+      label: "全部替换",
+      disabled: !currentResult?.editable || !searchingGrid || (gridHits ?? 0) === 0,
+      run: () => void replaceGridValues()
+    },
     remove: {
       label: "删除选中行",
       disabled: !currentResult?.editable || !gridSelection,
@@ -345,6 +380,8 @@ export function useResultGrid(options: UseResultGridOptions) {
   return {
     gridSelection, setGridSelection,
     gridSearch, setGridSearch,
+    gridReplace, setGridReplace,
+    gridReplaceOpen, setGridReplaceOpen,
     gridKeyword, setGridKeyword, gridHits, setGridHits,
     gridFlash, setGridFlash,
     searchingGrid,

@@ -1981,6 +1981,31 @@ table.table-list .table-name-text {
   outline: none;
 }
 
+/* 搜索框里的「展开替换」开关：宽高与图标对齐，悬停给底色 */
+.toolbar-search .search-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.toolbar-search .search-toggle:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.toolbar-search .search-toggle.is-active {
+  color: var(--text);
+}
+
 .console {
   flex: 1;
   min-height: 0;

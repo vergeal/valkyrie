@@ -148,9 +148,37 @@ export function App() {
     updateTab, createQueryTab, openQueryTab, closeTabs, closeTab, updateQueryPath
   } = tabsApi;
 
+  /*
+   * 「对象信息」看的是用户当前焦点：在数据表 / 设计页操作时跟着那张表走，
+   * 在对象树 / 对象列表里选节点时跟着选中的节点走，避免信息与手头对象对不上。
+   */
+  const [infoFocus, setInfoFocus] = useState<"tree" | "tab">("tree");
+  const activeTabObjectNode = activeTab && (activeTab.kind === "data" || activeTab.kind === "design")
+    ? activeTab.node
+    : null;
+
+  /* 非查询面板的信息主体：数据 / 设计页看那张表，否则看对象树焦点 */
+  const focusedNode = infoFocus === "tab" && activeTabObjectNode ? activeTabObjectNode : activeNode;
+
+  /*
+   * 结构信息只为「当前确实在看的表」加载：查询控制台不看表，所以不加载；
+   * 其余面板跟着信息主体走，保证列 / 索引与展示的节点对上。
+   */
+  const columnInfoNode = activeTab?.kind === "query" ? null : focusedNode;
+
+  /* 选中对象树节点：信息主体切回该节点 */
+  useEffect(() => {
+    setInfoFocus("tree");
+  }, [activeNode]);
+
+  /* 切换标签：数据 / 设计页把它对应的表作为信息主体，其它页回落对象树 */
+  useEffect(() => {
+    setInfoFocus(activeTabObjectNode ? "tab" : "tree");
+  }, [activeTabId, activeTabObjectNode]);
+
   /* Schema 域：对象树缓存 / 载入 / 展开 / 刷新，以及结构信息（列 / 索引） */
   const schema = useSchemaTree({
-    expanded, setExpanded, loadingNodes, setLoadingNodes, activeNode,
+    expanded, setExpanded, loadingNodes, setLoadingNodes, activeNode: columnInfoNode,
     session, openSessions, connections, rootsByConnection,
     tabs, setTabs, activeTabId, setActiveTabId,
     openConnection, refreshConnectionRoots,
@@ -189,6 +217,24 @@ export function App() {
     schemaOptions, setSchemaOptions, tableNodes, setTableNodes,
     suggestionContextRef
   } = queryContext;
+
+  /*
+   * 查询控制台没有对应的表对象，信息主体改看顶部选的模式 / 数据库；
+   * 都没选就留空，不借用对象树里选中的节点，免得张冠李戴。
+   */
+  const queryInfoNode = useMemo(() => {
+    if (activeTab?.kind !== "query")
+      return null;
+
+    const { schema: schemaName, catalog } = activeTab.path;
+
+    return (schemaName ? schemaOptions.find(node => node.label === schemaName) : undefined)
+      ?? (catalog ? catalogOptions.find(node => node.label === catalog) : undefined)
+      ?? null;
+  }, [activeTab, schemaOptions, catalogOptions]);
+
+  /* 对象信息主体：查询控制台看执行上下文，其它面板看数据 / 设计页或对象树焦点 */
+  const infoNode = activeTab?.kind === "query" ? queryInfoNode : focusedNode;
 
   /* 对象页 + 脚本域：「对象」标签（表列表 / 脚本列表）与脚本生命周期 */
   const objects = useObjectPage({
@@ -386,6 +432,8 @@ export function App() {
   const {
     gridSelection, setGridSelection,
     gridSearch, setGridSearch,
+    gridReplace, setGridReplace,
+    gridReplaceOpen, setGridReplaceOpen,
     gridKeyword, setGridKeyword, gridHits, setGridHits,
     gridFlash, setGridFlash,
     searchingGrid,
@@ -442,6 +490,11 @@ export function App() {
 
   /* 当前标签在对象树里对应的节点（有才给「定位」按钮） */
   const locatableNode = treeNodeOfTab(activeTab, treeChildren);
+
+  /* 对象信息所属连接：数据 / 设计页按表取，查询控制台按标签记的连接取 */
+  const infoSession = (activeTab?.kind === "query"
+    ? sessionOfTabHelper(activeTab, openSessions, session)
+    : infoNode ? sessionOfNode(infoNode) : null) ?? session;
 
   return (
     <div className={`app${settings.gridZebra ? "" : " no-zebra"}${settings.gridRowNumbers ? "" : " no-rownum"}${IS_MAC ? " is-mac" : ""}${themeResolved === "dark" ? " is-dark" : " is-light"}`}>
@@ -503,7 +556,14 @@ export function App() {
         <Separator className="splitter splitter-v splitter-side" aria-label="调整对象树宽度" />
 
         <Panel id="work" className="work-panel" minSize="30%">
-        <main className="work-main">
+        <main
+          className="work-main"
+          /* 在工作区里操作（网格 / 工具条等）→ 信息主体跟着当前数据 / 设计页 */
+          onMouseDownCapture={() => {
+            if (activeTabObjectNode)
+              setInfoFocus("tab");
+          }}
+        >
           <WorkTabs
             tabs={tabs}
             activeTabId={activeTabId}
@@ -613,6 +673,10 @@ export function App() {
                 resultActions={resultActions}
                 gridSearch={gridSearch}
                 setGridSearch={setGridSearch}
+                gridReplace={gridReplace}
+                setGridReplace={setGridReplace}
+                gridReplaceOpen={gridReplaceOpen}
+                setGridReplaceOpen={setGridReplaceOpen}
                 searchingGrid={searchingGrid}
                 gridHits={gridHits}
                 gridKeyword={gridKeyword}
@@ -653,9 +717,9 @@ export function App() {
 
         <Panel id="info" className="info-panel" defaultSize="19%" minSize="12%" maxSize="30%">
           <InfoPanel
-            node={activeNode}
-            connectionName={session?.name ?? null}
-            product={session?.product ?? null}
+            node={infoNode}
+            connectionName={infoSession?.name ?? null}
+            product={infoSession?.product ?? null}
             columns={infoColumns}
             indexes={infoIndexes}
             onOpenData={openTableData}

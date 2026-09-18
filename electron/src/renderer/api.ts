@@ -139,6 +139,8 @@ export interface QueryResultPayload {
   dirty?: boolean;
   /** 待删除但还没提交的行下标（提交后才真正消失） */
   deletedRows?: number[];
+  /** 全局替换实际改动的单元格数（result.replace 返回） */
+  replaced?: number;
   offset?: number;
   size?: number;
 }

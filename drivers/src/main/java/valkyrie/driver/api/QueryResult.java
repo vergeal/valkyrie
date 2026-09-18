@@ -198,6 +198,74 @@ public class QueryResult
 
         }
 
+        /**
+         * 在指定行里做不区分大小写的全局替换，结果记入待提交缓冲（与单元格编辑同一套语义），
+         * 必须点「提交修改」才会写库，中途可以「回滚」。
+         *
+         * @param rowIndices 参与替换的行下标（搜索过滤时传可见行，避免改到看不见的数据）
+         * @param find       被替换的文本
+         * @param replacement 替换成的文本
+         * @return 实际改动的单元格数
+         */
+        public int replaceValues(int[] rowIndices, String find, String replacement)
+        {
+                if (columns == null || rowIndices == null || find == null || find.isEmpty())
+                        return 0;
+
+                String target = replacement == null ? "" : replacement;
+                int changed = 0;
+
+                for (int rowIndex : rowIndices) {
+                        if (rowIndex < 0 || rowIndex >= rows.size())
+                                continue;
+
+                        /* 以缓冲里的最新值为准：替换前手动改过的单元格也要能被替换到 */
+                        GridRow effective = updateRowBuffer.getOrDefault(rowIndex, rows.get(rowIndex));
+
+                        for (int col = 0; col < columns.size() && col < effective.size(); col++) {
+                                String current = effective.get(col);
+
+                                if (current == null)
+                                        continue;
+
+                                String next = replaceAllIgnoreCase(current, find, target);
+
+                                if (!next.equals(current)) {
+                                        addUpdateRow(col, rowIndex, next);
+                                        changed++;
+                                }
+                        }
+                }
+
+                return changed;
+        }
+
+        /**
+         * 不区分大小写地把 {@code find} 全部替换成 {@code replacement}。
+         * 用 regionMatches 逐位比对而不是先 toLowerCase，避免某些语言下
+         * 大小写转换改变长度导致下标错位。
+         */
+        private static String replaceAllIgnoreCase(String text, String find, String replacement)
+        {
+                int length = find.length();
+                StringBuilder builder = new StringBuilder();
+                int from = 0;
+                int index = 0;
+
+                while (index <= text.length() - length) {
+                        if (text.regionMatches(true, index, find, 0, length)) {
+                                builder.append(text, from, index).append(replacement);
+                                index += length;
+                                from = index;
+                        } else {
+                                index++;
+                        }
+                }
+
+                builder.append(text, from, text.length());
+                return builder.toString();
+        }
+
         public boolean isUpdatable()
         {
                 return !updateRowBuffer.isEmpty();
