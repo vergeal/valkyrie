@@ -54,6 +54,8 @@ function sortValue(script: ScriptFile, key: SortKey): string | number {
  */
 export function ScriptList(props: ScriptListProps) {
   const { scripts, loading, filter, flashToken = 0, selectedPaths, onSelectionChange, onOpen, onContextMenu } = props;
+  /* 选中判断从 O(选中数) 的 includes 换成 Set，全选大列表时不再 O(N²) */
+  const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({ key: "name", direction: "asc" });
   const [refreshing, setRefreshing] = useState(false);
   const anchor = useRef<number | null>(null);
@@ -118,7 +120,7 @@ export function ScriptList(props: ScriptListProps) {
     anchor.current = index;
 
     if (additive) {
-      onSelectionChange(selectedPaths.includes(path)
+      onSelectionChange(selectedSet.has(path)
         ? selectedPaths.filter(item => item !== path)
         : [...selectedPaths, path]);
       return;
@@ -156,13 +158,13 @@ export function ScriptList(props: ScriptListProps) {
           {visible.map((script, index) => (
             <tr
               key={script.path}
-              className={selectedPaths.includes(script.path) ? "is-active" : undefined}
+              className={selectedSet.has(script.path) ? "is-active" : undefined}
               onClick={event => selectRow(event, index)}
               onDoubleClick={() => onOpen(script)}
               onContextMenu={event => {
                 event.preventDefault();
 
-                if (!selectedPaths.includes(script.path))
+                if (!selectedSet.has(script.path))
                   onSelectionChange([script.path]);
 
                 onContextMenu(script);

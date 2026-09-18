@@ -129,16 +129,27 @@ export interface SuggestionItem {
   detail?: string;
 }
 
+/** 结果集增量：本次真正变化的行 `[行下标, 行数据]` */
+export type ResultChangedRow = [number, (string | null)[]];
+
 export interface QueryResultPayload {
   jobId?: number;
   hasResultSet: boolean;
   columns?: QueryColumn[];
   rows?: (string | null)[][];
+  /** 结果集总行数（可能大于本次回传的 rows） */
+  rowCount?: number;
+  /** 是否还有未加载的行（用 result.page 继续加载） */
+  truncated?: boolean;
   editable?: boolean;
   addable?: boolean;
   dirty?: boolean;
   /** 待删除但还没提交的行下标（提交后才真正消失） */
   deletedRows?: number[];
+  /** 有未提交修改的行下标 */
+  dirtyRows?: number[];
+  /** 增量回传：只包含本次变化的行 */
+  changed?: ResultChangedRow[];
   /** 全局替换实际改动的单元格数（result.replace 返回） */
   replaced?: number;
   offset?: number;
@@ -200,6 +211,8 @@ declare global {
       windowControl?: (action: "minimize" | "maximize" | "close") => void;
       onWindowState?: (callback: (state: { maximized: boolean }) => void) => () => void;
       onShortcut?: (callback: (action: string) => void) => () => void;
+      /** 写系统剪贴板（走主进程，避免 navigator.clipboard 的聚焦 / 用户激活限制） */
+      writeClipboard?: (text: string) => Promise<boolean>;
       chooseSavePath?: (options: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
       chooseOpenPath?: (options: { title?: string; defaultPath?: string; directory?: boolean; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
       revealPath?: (target: string) => Promise<boolean>;
@@ -249,6 +262,17 @@ export function onWindowState(callback: (state: { maximized: boolean }) => void)
 /** 订阅原生菜单转发过来的快捷键（目前只有 macOS 的 ⌘A） */
 export function onShortcut(callback: (action: string) => void): () => void {
   return window.valkyrie?.onShortcut?.(callback) ?? (() => undefined);
+}
+
+/** 写系统剪贴板（优先走主进程，回退浏览器 API） */
+export function writeClipboard(text: string): Promise<boolean> {
+  if (window.valkyrie?.writeClipboard)
+    return window.valkyrie.writeClipboard(text);
+
+  if (navigator.clipboard?.writeText)
+    return navigator.clipboard.writeText(text).then(() => true).catch(() => false);
+
+  return Promise.resolve(false);
 }
 
 export function chooseSavePath(options: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null> {

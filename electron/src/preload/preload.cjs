@@ -40,6 +40,9 @@ contextBridge.exposeInMainWorld("valkyrie", {
     return () => ipcRenderer.off("valkyrie:shortcut", listener);
   },
 
+  /* 写系统剪贴板（结果表 / 对象列表复制，比 navigator.clipboard 可靠） */
+  writeClipboard: text => ipcRenderer.invoke("valkyrie:write-clipboard", text),
+
   /* 导出另存为 / 在文件夹中显示 */
   chooseSavePath: options => ipcRenderer.invoke("valkyrie:choose-save-path", options),
 

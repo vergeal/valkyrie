@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { chooseOpenPath, invoke, messageOf, type SavedConnection } from "../api";
+import { chooseOpenPath, invoke, messageOf, writeClipboard, type SavedConnection } from "../api";
 import { DbLogo } from "./dbLogo";
 import { Icon } from "./icons";
 import { Dialog } from "./Dialog";
@@ -610,7 +610,7 @@ export function ConnectionDialog({ mode, source, initialType, onClose, onSaved }
                 <button
                   type="button"
                   className="mini-btn"
-                  onClick={() => void navigator.clipboard?.writeText(url)}
+                  onClick={() => void writeClipboard(url)}
                 >
                   <Icon name="copy" size={13} />复制
                 </button>

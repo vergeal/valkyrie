@@ -123,6 +123,20 @@ public class QueryResult
                 return rows.size();
         }
 
+        /**
+         * 行的「当前展示值」：有未提交修改时取缓冲里的版本，否则取原始行。
+         *
+         * @param index 行下标
+         * @return 对应行；下标越界时返回 {@code null}
+         */
+        public GridRow effectiveRow(int index)
+        {
+                if (index < 0 || index >= rows.size())
+                        return null;
+
+                return updateRowBuffer.getOrDefault(index, rows.get(index));
+        }
+
         public void setColumns(List<Column> columns)
         {
                 this.columns = columns;

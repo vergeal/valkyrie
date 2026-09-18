@@ -118,6 +118,23 @@ public abstract class Driver implements SQLExecutor
         }
 
         /**
+         * 释放驱动持有的数据源。
+         * <p>
+         * 默认只释放当前数据源；持有多个连接池的子类（如 PostgreSQL 按库分池）覆盖本方法，
+         * 确保断开连接时不会遗漏池子。
+         */
+        public void closeDataSources()
+        {
+                if (dataSource != null) {
+                        try {
+                                dataSource.close();
+                        } catch (Exception e) {
+                                // 关闭失败不应影响会话清理
+                        }
+                }
+        }
+
+        /**
          * 返回当前驱动实现的数据库类型。
          * <p>
          * 该类型用于标识底层数据库产品（如 MySQL、PostgreSQL、Oracle 等），
@@ -909,6 +926,9 @@ public abstract class Driver implements SQLExecutor
                         }
                 } catch (SQLException e) {
                         throw new DriverException(e);
+                } finally {
+                        /* 执行结束（正常返回或异常）都要移除，否则每条查询都会在 taskQueue 里留一个 Statement */
+                        taskQueue.remove(jobId);
                 }
         }
 
@@ -917,6 +937,11 @@ public abstract class Driver implements SQLExecutor
         public void cancel(long jobId)
         {
                 if (taskQueue.containsKey(jobId))
-                        Captor.call(() -> taskQueue.remove(jobId).cancel());
+                        Captor.call(() -> {
+                                Statement statement = taskQueue.remove(jobId);
+
+                                if (statement != null)
+                                        statement.cancel();
+                        });
         }
 }

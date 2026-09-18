@@ -207,6 +207,8 @@ function buildRuntime() {
     "--no-header-files",
     "--no-man-pages",
     "--compress=zip-6",
+    /* 生成基础 CDS 归档，随运行时一起分发，类加载更快（要求构建机与目标机同平台） */
+    "--generate-cds-archive",
     "--output", runtimeDir
   ]);
 

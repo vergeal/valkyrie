@@ -56,6 +56,8 @@ export function useResultGrid(options: UseResultGridOptions) {
   const [gridHits, setGridHits] = useState<number | null>(null);
   /* 刷新反馈：不弹提示，改成表格闪一下（计数变化即触发动画） */
   const [gridFlash, setGridFlash] = useState(0);
+  /* 大结果集分页加载中 */
+  const [loadingMore, setLoadingMore] = useState(false);
 
   /* 结果集搜索防抖：连续输入时只在停顿后过滤一次（同 FX 版 100ms） */
   useEffect(() => {
@@ -93,6 +95,27 @@ export function useResultGrid(options: UseResultGridOptions) {
     return activeTab && "pending" in activeTab ? activeTab.pending ?? 0 : 0;
   }
 
+  /*
+   * 应用数据层的返回：整窗口响应（带 rows）直接替换；增量响应（带 changed）
+   * 只更新变化的行，避免编辑一个大结果集时把整份行数据搬来搬去。
+   */
+  function applyResultPayload(
+    current: QueryResultPayload,
+    payload: QueryResultPayload,
+    offset?: number,
+    size?: number
+  ): QueryResultPayload {
+    if (Array.isArray(payload.rows))
+      return { ...current, ...payload, offset, size };
+
+    const rows = (current.rows ?? []).slice();
+
+    for (const [index, values] of payload.changed ?? [])
+      rows[index] = values;
+
+    return { ...current, ...payload, rows, offset, size };
+  }
+
   async function runResultAction(method: string, params: Record<string, unknown> = {}, success?: string) {
     if (!activeTab || !("result" in activeTab) || !activeTab.result?.jobId)
       return;
@@ -122,11 +145,9 @@ export function useResultGrid(options: UseResultGridOptions) {
       const clearsPending = method === "result.commit" || method === "result.rollback" || method === "result.reload";
 
       updateTab(tabId, {
-        result: { ...payload, offset, size },
-        /* 记录哪些行有未提交修改，用于行高亮（一处都没替换到就不动标记） */
-        dirtyRows: method === "result.replace" && replaced === 0
-          ? activeTab.dirtyRows
-          : resolveDirtyRows(method, params, activeTab.dirtyRows),
+        result: applyResultPayload(activeTab.result, payload, offset, size),
+        /* 数据层会带回准确的行高亮集合；旧协议缺这个字段时退回本地累计 */
+        dirtyRows: payload.dirtyRows ?? resolveDirtyRows(method, params, activeTab.dirtyRows),
         pending: clearsPending ? 0 : pendingBefore + delta
       });
 
@@ -148,6 +169,49 @@ export function useResultGrid(options: UseResultGridOptions) {
     } catch (e) {
       setError(messageOf(e));
     } finally {
+      setPending(null);
+    }
+  }
+
+  /**
+   * 加载更多：结果超出首个窗口时，从数据层按偏移取下一段行追加到本地。
+   * 已加载行保持前缀连续，行下标与数据层一致，编辑/删除仍然按绝对下标生效。
+   */
+  async function loadMoreRows() {
+    if (loadingMore || !activeTab || !("result" in activeTab) || !activeTab.result?.jobId)
+      return;
+
+    const current = activeTab.result;
+
+    if (!current.truncated)
+      return;
+
+    const tabId = activeTab.id;
+    const loaded = current.rows?.length ?? 0;
+
+    setLoadingMore(true);
+    setPending("result.page");
+
+    try {
+      const payload = await withBusy(() => invoke<QueryResultPayload>("result.page", {
+        jobId: current.jobId,
+        offset: loaded,
+        size: 1000
+      }));
+
+      updateTab(tabId, {
+        result: {
+          ...current,
+          ...payload,
+          rows: [...(current.rows ?? []), ...(payload.rows ?? [])],
+          offset: current.offset,
+          size: current.size
+        }
+      });
+    } catch (e) {
+      setError(messageOf(e));
+    } finally {
+      setLoadingMore(false);
       setPending(null);
     }
   }
@@ -349,6 +413,11 @@ export function useResultGrid(options: UseResultGridOptions) {
       label: "刷新",
       disabled: false,
       run: () => void runResultAction("result.reload", {}, "已刷新")
+    },
+    loadMore: {
+      label: "加载更多",
+      disabled: !currentResult?.truncated || loadingMore,
+      run: () => void loadMoreRows()
     }
   };
 
@@ -371,10 +440,11 @@ export function useResultGrid(options: UseResultGridOptions) {
       ]
     },
     { separator: true },
-    { label: "导出 CSV", icon: "csv", action: () => void exportResult("csv") },
-    { label: "导出 Excel", icon: "excel", action: () => void exportResult("excel") },
+    { label: "导出 CSV", action: () => void exportResult("csv") },
+    { label: "导出 Excel", action: () => void exportResult("excel") },
     { separator: true },
-    { label: "刷新", action: () => void runResultAction("result.reload", {}, "已刷新") }
+    { label: "刷新", action: () => void runResultAction("result.reload", {}, "已刷新") },
+    { label: resultActions.loadMore.label, disabled: resultActions.loadMore.disabled, action: resultActions.loadMore.run }
   ];
 
   return {
@@ -385,6 +455,7 @@ export function useResultGrid(options: UseResultGridOptions) {
     gridKeyword, setGridKeyword, gridHits, setGridHits,
     gridFlash, setGridFlash,
     searchingGrid,
+    loadingMore, loadMoreRows,
     resultActions, gridMenuEntries,
     runResultAction, copyGridSelection
   };

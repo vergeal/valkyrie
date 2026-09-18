@@ -35,6 +35,8 @@ export function ResultPane(props: {
   gridHits: number | null;
   gridKeyword: string;
   gridFlash: number;
+  loadingMore: boolean;
+  onLoadMore: () => void;
   setGridHits: (value: number | null) => void;
   setGridSelection: (value: GridSelection | null) => void;
   onCellCommit: (row: number, col: number, value: string | null) => void;
@@ -66,7 +68,7 @@ export function ResultPane(props: {
     tabsEmpty, pageTab, resultPane, setResultPane, activeTab, rows, columns, lastCost,
     currentResult, pending, settings, resultActions,
     gridSearch, setGridSearch, gridReplace, setGridReplace, gridReplaceOpen, setGridReplaceOpen,
-    searchingGrid, gridHits, gridKeyword, gridFlash,
+    searchingGrid, gridHits, gridKeyword, gridFlash, loadingMore, onLoadMore,
     setGridHits, setGridSelection, onCellCommit, onExport, onExplain, onGridContextMenu,
     tableFilter, listFlash, tableSelection, setTableSelection, setActiveNode, onOpenTable, onTableContextMenu,
     scriptFilter, scriptFlash, scriptSelection, setScriptSelection, onOpenScript, onScriptContextMenu,
@@ -218,6 +220,12 @@ export function ResultPane(props: {
               </button>
             </>
           )}
+          {/* 结果集超过首个窗口：显示已加载进度，按需继续拉取 */}
+          {currentResult.truncated && (
+            <button type="button" className="tbtn" disabled={loadingMore} onClick={onLoadMore}>
+              <Icon name="chevronDown" />已加载 {rows.length}/{currentResult.rowCount ?? "?"} 行{loadingMore ? " · 加载中" : " · 加载更多"}
+            </button>
+          )}
           <span className="toolbar-text">
             {currentResult.editable ? "可编辑" : "只读"}{searchingGrid ? " · 改动只作用于可见行" : ""}
             {currentResult.dirty
@@ -324,7 +332,7 @@ export function ResultPane(props: {
           />
         )}
 
-        {/* 日志面板常驻（切到别的页时只是隐藏），筛选、搜索、滚动位置都能保住 */}
+        {/* 日志面板常驻（切到别的页时保留筛选/搜索状态），不可见时列表不渲染，避免白跑 */}
         {!pageTab && (
           <LogConsole
             records={logs}

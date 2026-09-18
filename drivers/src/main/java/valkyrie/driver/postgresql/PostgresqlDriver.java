@@ -18,6 +18,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import static valkyrie.utils.collection.Lists.first;
@@ -36,7 +37,7 @@ public class PostgresqlDriver extends Driver
         private static final Logger LOG = LoggerFactory.getLogger(PostgresqlDriver.class);
 
         private final String defaultKey = "__init_default__";
-        private final Map<String, VkDataSource> dataSourceManager = new HashMap<>();
+        private final Map<String, VkDataSource> dataSourceManager = new ConcurrentHashMap<>();
 
         private Set<String> indexTypes;
 
@@ -50,6 +51,20 @@ public class PostgresqlDriver extends Driver
         public DbType getType()
         {
                 return DbType.postgresql;
+        }
+
+        @Override
+        public void closeDataSources()
+        {
+                for (VkDataSource source : dataSourceManager.values()) {
+                        try {
+                                source.close();
+                        } catch (Exception e) {
+                                LOG.warn("关闭数据源失败", e);
+                        }
+                }
+
+                dataSourceManager.clear();
         }
 
         @Override
@@ -187,6 +202,10 @@ public class PostgresqlDriver extends Driver
                 ConnectionConfig cnf = ds.getConnectionConfig();
 
                 for (String catalog : catalogs) {
+                        /* 已经为该库建过池就直接复用：刷新对象树会反复调用本方法，重复建池会泄漏连接 */
+                        if (dataSourceManager.containsKey(catalog))
+                                continue;
+
                         ConnectionConfig cc =
                                 BeanUtils.copyProperties(cnf, ConnectionConfig.class);
                         String jdbcUrl = JdbcUtils.updateDefaultDatabase(cc.getJdbcUrl(), catalog);

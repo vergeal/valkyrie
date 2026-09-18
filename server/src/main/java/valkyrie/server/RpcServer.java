@@ -24,7 +24,6 @@ import valkyrie.driver.api.QueryResult;
 import valkyrie.driver.api.SQLExecuteCallback;
 import valkyrie.driver.api.Session;
 import valkyrie.driver.api.Table;
-import valkyrie.driver.api.VkDataSource;
 import valkyrie.driver.api.node.DBNode;
 import valkyrie.driver.api.node.DBCatalogNode;
 import valkyrie.driver.api.node.DBColumnNode;
@@ -42,6 +41,7 @@ import valkyrie.driver.suggestion.SuggestionEngine;
 import valkyrie.utils.exception.Causes;
 import valkyrie.utils.poi.WorkBook;
 
+import java.io.BufferedWriter;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -50,14 +50,18 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import java.io.PrintStream;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Deque;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -101,6 +105,12 @@ public class RpcServer
         /* 已执行的结果集缓存：编辑、提交、删除都作用在同一个 QueryResult 上 */
         private final Map<Long, QueryResult> resultCache = new ConcurrentHashMap<>();
         private final Map<Long, String> resultOwner = new ConcurrentHashMap<>();
+        /* 结果集按写入先后排队；超过上限时淘汰最老的一份，避免长会话把历史上所有结果集都留在堆里 */
+        private final Deque<Long> resultOrder = new ConcurrentLinkedDeque<>();
+        private static final int RESULT_CACHE_LIMIT = 64;
+        /* 单次响应最多回传的结果行数；大结果集用 result.page 按需继续加载 */
+        private static final int RESULT_WINDOW_ROWS = 1000;
+        private static final int RESULT_PAGE_MAX = 2000;
         private final AtomicLong sessionSequence = new AtomicLong();
 
         public RpcServer(PrintStream out)
@@ -175,6 +185,7 @@ public class RpcServer
                         case "result.commit" -> commitResult(params);
                         case "result.rollback" -> rollbackResult(params);
                         case "result.reload" -> reloadResult(params);
+                        case "result.page" -> resultPage(params);
                         case "queryFiles.list" -> listQueryFiles(params);
                         case "queryFiles.read" -> readQueryFile(params);
                         case "queryFiles.save" -> saveQueryFile(params);
@@ -346,7 +357,7 @@ public class RpcServer
 
                         return ret;
                 } catch (Throwable e) {
-                        closeQuietly(driver.getDataSource());
+                        driver.closeDataSources();
                         throw e;
                 }
         }
@@ -357,7 +368,7 @@ public class RpcServer
                 OpenConnection session = sessions.remove(sessionId);
 
                 if (session != null)
-                        closeQuietly(session.driver.getDataSource());
+                        session.driver.closeDataSources();
 
                 if (sessionId != null)
                         suggestionEngines.keySet().removeIf(key -> key.startsWith(sessionId + "|"));
@@ -368,6 +379,7 @@ public class RpcServer
                                         return false;
 
                                 resultCache.remove(entry.getKey());
+                                resultOrder.remove(entry.getKey());
                                 return true;
                         });
                 }
@@ -439,7 +451,7 @@ public class RpcServer
 
                 JSONObject ret = new JSONObject();
                 ret.put("jobId", jobId);
-                ret.putAll(resultJson(jobId, queryResult));
+                ret.putAll(resultWindow(jobId, queryResult, 0, queryResult.size()));
                 ret.put("offset", offset);
                 ret.put("size", size);
 
@@ -551,6 +563,12 @@ public class RpcServer
                 "MONEY", "SMALLMONEY", "SERIAL", "BIGSERIAL", "BINARY_FLOAT", "BINARY_DOUBLE"
         );
 
+        /* 导出时每个单元格都会用到，全部预编译，避免 String.matches/split 每次现场编译正则 */
+        private static final Pattern NUMERIC_LITERAL = Pattern.compile("-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?");
+        private static final Pattern TYPE_SEPARATOR = Pattern.compile("[^A-Za-z0-9_]+");
+        /* 字段类型字符串高度重复，判断结果缓存起来 */
+        private final Map<String, Boolean> numericTypeCache = new ConcurrentHashMap<>();
+
         /** 把若干张表写成一份 SQL 脚本（结构 + 可选数据），返回写入的数据行数 */
         private JSONObject writeSqlDump(Driver driver, Session context, List<String> tables,
                 String path, boolean withData, String token)
@@ -559,7 +577,6 @@ public class RpcServer
                         throw new IllegalArgumentException("导出路径不能为空");
 
                 Dialect dialect = driver.getDialect();
-                StringBuilder builder = new StringBuilder();
                 int rowCount = 0;
                 int total = tables.size();
 
@@ -577,70 +594,70 @@ public class RpcServer
 
                 exportProgress(token, 0, total, null, 0, totalRows, "dump");
 
-                builder.append("-- Valkyrie SQL dump\n");
-                builder.append("-- 数据库: ").append(context.catalog() == null ? "" : context.catalog());
+                /* 边生成边写文件：整库 dump 可能是 GB 级，全部攒进 StringBuilder 会先撑爆内存 */
+                try (BufferedWriter writer = Files.newBufferedWriter(Path.of(path), StandardCharsets.UTF_8)) {
+                        writer.write("-- Valkyrie SQL dump\n");
+                        writer.write("-- 数据库: " + (context.catalog() == null ? "" : context.catalog()));
 
-                if (context.schema() != null)
-                        builder.append("  模式: ").append(context.schema());
+                        if (context.schema() != null)
+                                writer.write("  模式: " + context.schema());
 
-                builder.append("\n-- 时间: ")
-                        .append(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now()))
-                        .append("\n\n");
+                        writer.write("\n-- 时间: "
+                                + DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now())
+                                + "\n\n");
 
-                for (int index = 0; index < tables.size(); index++) {
-                        String table = tables.get(index);
+                        for (int index = 0; index < tables.size(); index++) {
+                                String table = tables.get(index);
 
-                        exportProgress(token, index, total, table, rowCount, totalRows, "dump");
+                                exportProgress(token, index, total, table, rowCount, totalRows, "dump");
 
-                        builder.append("-- ----------------------------\n");
-                        builder.append("-- 表结构: ").append(table).append("\n");
-                        builder.append("-- ----------------------------\n");
+                                writer.write("-- ----------------------------\n");
+                                writer.write("-- 表结构: " + table + "\n");
+                                writer.write("-- ----------------------------\n");
 
-                        String ddl = driver.showCreateTable(context, table).trim();
+                                String ddl = driver.showCreateTable(context, table).trim();
 
-                        builder.append(ddl);
-                        if (!ddl.endsWith(";"))
-                                builder.append(';');
+                                writer.write(ddl);
+                                if (!ddl.endsWith(";"))
+                                        writer.write(';');
 
-                        builder.append("\n\n");
+                                writer.write("\n\n");
 
-                        if (withData) {
-                                builder.append("-- 表数据: ").append(table).append("\n");
+                                if (withData) {
+                                        writer.write("-- 表数据: " + table + "\n");
 
-                                List<Column> columns = null;
-                                int offset = 0;
+                                        List<Column> columns = null;
+                                        int offset = 0;
 
-                                while (true) {
-                                        QueryResult result = driver.selectByPage(context, table, offset, DUMP_PAGE_SIZE);
-                                        List<GridRow> rows = result.getRows();
+                                        while (true) {
+                                                QueryResult result = driver.selectByPage(context, table, offset, DUMP_PAGE_SIZE);
+                                                List<GridRow> rows = result.getRows();
 
-                                        if (columns == null)
-                                                columns = result.getColumns();
+                                                if (columns == null)
+                                                        columns = result.getColumns();
 
-                                        for (GridRow row : rows) {
-                                                builder.append(dumpInsert(dialect, table, columns, row)).append('\n');
-                                                rowCount++;
+                                                for (GridRow row : rows) {
+                                                        writer.write(dumpInsert(dialect, table, columns, row));
+                                                        writer.write('\n');
+                                                        rowCount++;
+                                                }
+
+                                                exportProgress(token, index, total, table, rowCount, totalRows, "dump");
+
+                                                if (rows.size() < DUMP_PAGE_SIZE)
+                                                        break;
+
+                                                offset += rows.size();
                                         }
 
-                                        exportProgress(token, index, total, table, rowCount, totalRows, "dump");
-
-                                        if (rows.size() < DUMP_PAGE_SIZE)
-                                                break;
-
-                                        offset += rows.size();
+                                        writer.write('\n');
                                 }
 
-                                builder.append('\n');
+                                exportProgress(token, index + 1, total, table, rowCount, totalRows, "dump");
                         }
 
-                        exportProgress(token, index + 1, total, table, rowCount, totalRows, "dump");
-                }
-
-                /* 收尾：行数可能因精确统计而有出入，明确报一次进度，进度条才会走到 100% */
-                exportProgress(token, total, total, null, rowCount, Math.max(totalRows, rowCount), "dump");
-
-                try {
-                        Files.writeString(Path.of(path), builder, StandardCharsets.UTF_8);
+                        /* 收尾：行数可能因精确统计而有出入，明确报一次进度，进度条才会走到 100% */
+                        exportProgress(token, total, total, null, rowCount, Math.max(totalRows, rowCount), "dump");
                 } catch (Exception e) {
                         throw new CoreException(e);
                 }
@@ -707,7 +724,7 @@ public class RpcServer
 
                 String upper = type == null ? "" : type.toUpperCase(Locale.ROOT);
 
-                if (isNumericType(upper) && value.matches("-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?"))
+                if (isNumericType(upper) && NUMERIC_LITERAL.matcher(value).matches())
                         return value;
 
                 if (upper.contains("BOOL")) {
@@ -723,11 +740,16 @@ public class RpcServer
 
         private boolean isNumericType(String type)
         {
-                for (String token : type.split("[^A-Za-z0-9_]+"))
-                        if (NUMERIC_TYPES.contains(token))
-                                return true;
+                if (type == null)
+                        return false;
 
-                return false;
+                return numericTypeCache.computeIfAbsent(type, key -> {
+                        for (String token : TYPE_SEPARATOR.split(key))
+                                if (NUMERIC_TYPES.contains(token))
+                                        return true;
+
+                        return false;
+                });
         }
 
         /**
@@ -1163,7 +1185,17 @@ public class RpcServer
 
                 if (queryResult != null) {
                         cacheResult(sessionId, jobId, queryResult);
-                        ret.putAll(resultJson(jobId, queryResult));
+
+                        JSONObject window = resultWindow(jobId, queryResult, 0, RESULT_WINDOW_ROWS);
+
+                        /*
+                         * 结果超出首个窗口时前端只拿到前缀，「新增行」服务端会在末尾追加，
+                         * 下标对不上，这里直接禁用；可继续用 result.page 加载。
+                         */
+                        if (window.getBooleanValue("truncated"))
+                                window.put("addable", false);
+
+                        ret.putAll(window);
                 }
 
                 return ret;
@@ -1308,21 +1340,21 @@ public class RpcServer
                 return columns;
         }
 
-        private JSONArray rowsJson(QueryResult queryResult)
-        {
-                return rowsJson(queryResult, false);
-        }
-
         /**
-         * 行数据；{@code mergeBuffer} 为 true 时把未提交的修改合并进来，
+         * 行数据窗口；{@code mergeBuffer} 为 true 时把未提交的修改合并进来，
          * 让前端直接看到"改过但未提交"的效果。
+         * <p>
+         * 只序列化 {@code [offset, offset+size)} 区间，避免一次性把大结果集整份塞进一行 JSON。
          */
-        private JSONArray rowsJson(QueryResult queryResult, boolean mergeBuffer)
+        private JSONArray rowsJson(QueryResult queryResult, int offset, int size, boolean mergeBuffer)
         {
                 JSONArray rows = new JSONArray();
                 var buffer = mergeBuffer ? queryResult.getUpdateRowBuffer() : Map.<Integer, GridRow>of();
+                int total = queryResult.getRows().size();
+                int from = Math.max(0, Math.min(offset, total));
+                int to = (int) Math.min(total, (long) from + Math.max(0, size));
 
-                for (int index = 0; index < queryResult.getRows().size(); index++) {
+                for (int index = from; index < to; index++) {
                         GridRow row = buffer.containsKey(index) ? buffer.get(index) : queryResult.getRows().get(index);
                         rows.add(new JSONArray(row));
                 }
@@ -1341,6 +1373,20 @@ public class RpcServer
 
                 resultCache.put(jobId, queryResult);
                 resultOwner.put(jobId, sessionId);
+
+                /* 同一 jobId 重复写入（例如分页）时保持队列里只有一份 */
+                resultOrder.remove(jobId);
+                resultOrder.addLast(jobId);
+
+                while (resultOrder.size() > RESULT_CACHE_LIMIT) {
+                        Long oldest = resultOrder.pollFirst();
+
+                        if (oldest == null)
+                                break;
+
+                        resultCache.remove(oldest);
+                        resultOwner.remove(oldest);
+                }
         }
 
         private QueryResult requireResult(JSONObject params)
@@ -1354,48 +1400,106 @@ public class RpcServer
                 return result;
         }
 
+        private JSONArray intArray(Collection<Integer> values)
+        {
+                return new JSONArray(values.stream().sorted().toList());
+        }
+
         /**
-         * 结果集回传：列、行、是否可编辑/可插入、是否有未提交修改。
+         * 结果集整窗口回传：列 + 指定区间的行 + 状态。
+         * 用于首次执行、分页加载、提交/刷新后的整体重发。
          */
-        private JSONObject resultJson(long jobId, QueryResult queryResult)
+        private JSONObject resultWindow(long jobId, QueryResult queryResult, int offset, int size)
         {
                 JSONObject ret = new JSONObject();
                 /* 回传 jobId，前端后续的编辑/提交/删除都基于同一个结果集 */
                 ret.put("jobId", jobId);
                 ret.put("hasResultSet", true);
                 ret.put("columns", columnsJson(queryResult));
-                ret.put("rows", rowsJson(queryResult, true));
+                ret.put("rows", rowsJson(queryResult, offset, size, true));
+                ret.put("rowCount", queryResult.size());
+                ret.put("offset", offset);
+                ret.put("size", size);
+                ret.put("truncated", (long) offset + size < queryResult.size());
                 ret.put("editable", queryResult.isEditable());
                 ret.put("addable", queryResult.isAddable());
                 ret.put("dirty", queryResult.isDirty());
                 /* 待删除但还没提交的行：界面把它们标出来，提交后才真的消失 */
-                ret.put("deletedRows", new JSONArray(queryResult.getDeleteRowBuffer().stream().sorted().toList()));
+                ret.put("deletedRows", intArray(queryResult.getDeleteRowBuffer()));
+                ret.put("dirtyRows", intArray(queryResult.getUpdateRowBuffer().keySet()));
 
                 return ret;
+        }
+
+        /**
+         * 结果集增量回传：只带回本次真正变化的行，不再整份重发。
+         * 编辑一个大结果集时，单次改动只传一行而不是全部行。
+         */
+        private JSONObject resultDelta(long jobId, QueryResult queryResult, Map<Integer, GridRow> changed)
+        {
+                JSONObject ret = new JSONObject();
+                ret.put("jobId", jobId);
+                ret.put("hasResultSet", true);
+                ret.put("rowCount", queryResult.size());
+                ret.put("dirty", queryResult.isDirty());
+                ret.put("deletedRows", intArray(queryResult.getDeleteRowBuffer()));
+                ret.put("dirtyRows", intArray(queryResult.getUpdateRowBuffer().keySet()));
+
+                JSONArray changedJson = new JSONArray();
+
+                changed.forEach((index, row) -> {
+                        if (row == null)
+                                return;
+
+                        JSONArray pair = new JSONArray();
+                        pair.add(index);
+                        pair.add(new JSONArray(row));
+                        changedJson.add(pair);
+                });
+
+                ret.put("changed", changedJson);
+                return ret;
+        }
+
+        /** 把若干行组装成「下标 → 当前展示行」，只回传真正变化的行 */
+        private Map<Integer, GridRow> changedRows(QueryResult result, int... indices)
+        {
+                Map<Integer, GridRow> changed = new LinkedHashMap<>();
+
+                for (int index : indices) {
+                        GridRow row = result.effectiveRow(index);
+
+                        if (row != null)
+                                changed.put(index, row);
+                }
+
+                return changed;
         }
 
         private Object updateCell(JSONObject params)
         {
                 QueryResult result = requireResult(params);
+                int row = params.getIntValue("row");
 
                 result.addUpdateRow(
                         params.getIntValue("col"),
-                        params.getIntValue("row"),
+                        row,
                         params.containsKey("value") ? params.getString("value") : null);
 
-                return resultJson(params.getLongValue("jobId"), result);
+                return resultDelta(params.getLongValue("jobId"), result, changedRows(result, row));
         }
 
         private Object setNull(JSONObject params)
         {
                 QueryResult result = requireResult(params);
+                int[] rows = toIntArray(params.getJSONArray("rows"));
+                int[] cols = toIntArray(params.getJSONArray("cols"));
 
-                for (int row : toIntArray(params.getJSONArray("rows"))) {
-                        for (int col : toIntArray(params.getJSONArray("cols")))
+                for (int row : rows)
+                        for (int col : cols)
                                 result.addUpdateRow(col, row, null);
-                }
 
-                return resultJson(params.getLongValue("jobId"), result);
+                return resultDelta(params.getLongValue("jobId"), result, changedRows(result, rows));
         }
 
         /**
@@ -1405,13 +1509,24 @@ public class RpcServer
         private Object replaceValues(JSONObject params)
         {
                 QueryResult result = requireResult(params);
+                int[] rows = toIntArray(params.getJSONArray("rows"));
 
                 int replaced = result.replaceValues(
-                        toIntArray(params.getJSONArray("rows")),
+                        rows,
                         params.getString("find"),
                         params.containsKey("replace") ? params.getString("replace") : "");
 
-                JSONObject ret = resultJson(params.getLongValue("jobId"), result);
+                /* 只回传确实进了缓冲（即被改到）的行 */
+                List<Integer> touched = new ArrayList<>();
+
+                for (int row : rows)
+                        if (result.getUpdateRowBuffer().containsKey(row))
+                                touched.add(row);
+
+                JSONObject ret = resultDelta(
+                        params.getLongValue("jobId"),
+                        result,
+                        changedRows(result, touched.stream().mapToInt(Integer::intValue).toArray()));
                 /* 实际改动的单元格数：前端据此显示提示与累计未提交改动 */
                 ret.put("replaced", replaced);
                 return ret;
@@ -1423,7 +1538,7 @@ public class RpcServer
 
                 result.addEmptyRow();
 
-                return resultJson(params.getLongValue("jobId"), result);
+                return resultDelta(params.getLongValue("jobId"), result, changedRows(result, result.size() - 1));
         }
 
         private Object deleteRows(JSONObject params)
@@ -1437,7 +1552,11 @@ public class RpcServer
                 /* 只记进待提交缓冲：点「提交修改」才真正 DELETE，中途可以「回滚」 */
                 result.remove(indices);
 
-                return resultJson(params.getLongValue("jobId"), result);
+                /* 被删的行要把之前未提交的单元格改动还原成原值 */
+                return resultDelta(
+                        params.getLongValue("jobId"),
+                        result,
+                        changedRows(result, indices.stream().mapToInt(Integer::intValue).toArray()));
         }
 
         private Object commitResult(JSONObject params)
@@ -1446,16 +1565,22 @@ public class RpcServer
 
                 result.update();
 
-                return resultJson(params.getLongValue("jobId"), result);
+                /* 提交会重读结果集，行数 / 内容都可能变，整窗口重发 */
+                return resultWindow(params.getLongValue("jobId"), result, 0, RESULT_WINDOW_ROWS);
         }
 
         private Object rollbackResult(JSONObject params)
         {
                 QueryResult result = requireResult(params);
+                Map<Integer, GridRow> changed = new LinkedHashMap<>();
+
+                /* 缓冲里的行要还原成原始值，只回传这些行 */
+                for (int index : result.getUpdateRowBuffer().keySet())
+                        changed.put(index, result.getRows().get(index));
 
                 result.clearUpdateBuffer();
 
-                return resultJson(params.getLongValue("jobId"), result);
+                return resultDelta(params.getLongValue("jobId"), result, changed);
         }
 
         private Object reloadResult(JSONObject params)
@@ -1465,7 +1590,22 @@ public class RpcServer
                 result.reload();
                 result.clearUpdateBuffer();
 
-                return resultJson(params.getLongValue("jobId"), result);
+                return resultWindow(params.getLongValue("jobId"), result, 0, RESULT_WINDOW_ROWS);
+        }
+
+        /**
+         * 结果集分页：从缓存的结果集里取一段行返回，供前端按需继续加载。
+         * 只回传该区间的行，不再整份重发。
+         */
+        private Object resultPage(JSONObject params)
+        {
+                QueryResult result = requireResult(params);
+
+                int offset = Math.max(0, params.getIntValue("offset"));
+                int size = params.containsKey("size") ? params.getIntValue("size") : RESULT_WINDOW_ROWS;
+                size = Math.max(1, Math.min(size, RESULT_PAGE_MAX));
+
+                return resultWindow(params.getLongValue("jobId"), result, offset, size);
         }
 
         private int[] toIntArray(JSONArray array)
@@ -1628,31 +1768,30 @@ public class RpcServer
                         throw new IllegalArgumentException("导出路径不能为空");
 
                 if ("csv".equalsIgnoreCase(format)) {
-                        StringBuilder builder = new StringBuilder();
+                        /* 流式写出，避免整份 CSV 在内存里拼好再落盘 */
+                        try (BufferedWriter writer = Files.newBufferedWriter(Path.of(path), StandardCharsets.UTF_8)) {
+                                /* 带 BOM，Excel 打开中文不乱码 */
+                                writer.write('\uFEFF');
 
-                        for (int i = 0; i < result.getColumns().size(); i++) {
-                                if (i > 0)
-                                        builder.append(',');
-
-                                builder.append(csv(result.getColumns().get(i).getLabel()));
-                        }
-
-                        builder.append("\r\n");
-
-                        for (GridRow row : result.getRows()) {
-                                for (int i = 0; i < row.size(); i++) {
+                                for (int i = 0; i < result.getColumns().size(); i++) {
                                         if (i > 0)
-                                                builder.append(',');
+                                                writer.write(',');
 
-                                        builder.append(csv(row.get(i)));
+                                        writer.write(csv(result.getColumns().get(i).getLabel()));
                                 }
 
-                                builder.append("\r\n");
-                        }
+                                writer.write("\r\n");
 
-                        try {
-                                /* 带 BOM，Excel 打开中文不乱码 */
-                                Files.writeString(Path.of(path), "\uFEFF" + builder, StandardCharsets.UTF_8);
+                                for (GridRow row : result.getRows()) {
+                                        for (int i = 0; i < row.size(); i++) {
+                                                if (i > 0)
+                                                        writer.write(',');
+
+                                                writer.write(csv(row.get(i)));
+                                        }
+
+                                        writer.write("\r\n");
+                                }
                         } catch (Exception e) {
                                 throw new CoreException(e);
                         }
@@ -1734,18 +1873,6 @@ public class RpcServer
                 return value;
         }
 
-        private void closeQuietly(VkDataSource dataSource)
-        {
-                if (dataSource == null)
-                        return;
-
-                try {
-                        dataSource.close();
-                } catch (Exception e) {
-                        LOG.warn("关闭数据源失败", e);
-                }
-        }
-
         public void shutdown()
         {
                 /* 先让已提交的请求执行完，再释放数据源，避免最后一批响应被截断 */
@@ -1760,7 +1887,7 @@ public class RpcServer
                 }
 
                 for (OpenConnection session : sessions.values())
-                        closeQuietly(session.driver.getDataSource());
+                        session.driver.closeDataSources();
 
                 sessions.clear();
         }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   revealPath,
+  writeClipboard,
   type SchemaNode
 } from "./api";
 import type { ResultPane, SessionState, WorkTab } from "./app/appTypes";
@@ -28,7 +29,8 @@ import {
   moveTabInList,
   tabIconName,
   tabKindLabel,
-  treeNodeOfTab
+  treeNodeOfTab,
+  type SqlResolver
 } from "./tabs/tabHelpers";
 import { type TableContext } from "./table/tableActions";
 import { useTableData } from "./table/useTableData";
@@ -107,6 +109,20 @@ export function App() {
   /* 执行上下文动作回填：connection 在关闭连接时清空数据库候选 */
   const queryContextApiRef = useRef<ReturnType<typeof useQueryContext> | null>(null);
 
+  /*
+   * 编辑器内容草稿：逐键只写进这个 ref，不再逐键 setState（避免整棵组件树每敲一下重渲染）。
+   * 停顿后再同步回 tabs 状态（供行数显示 / 未保存圆点用）；执行 / 保存 / 关闭等操作
+   * 通过 resolveSql 读这里的权威值，保证不丢最近输入。
+   */
+  const sqlDraftRef = useRef<Map<string, string>>(new Map());
+  const sqlSyncTimerRef = useRef(0);
+  const sqlResolverRef = useRef<SqlResolver | null>(null);
+
+  if (!sqlResolverRef.current)
+    sqlResolverRef.current = tab => tab.kind === "query" ? (sqlDraftRef.current.get(tab.id) ?? tab.sql) : "";
+
+  const resolveSql: SqlResolver = sqlResolverRef.current;
+
   /* 连接 / 会话域：连接列表 / 活动会话 / 根节点缓存 + 连接生命周期 */
   const connection = useConnectionSessions({
     tabsRef: tabsApiRef,
@@ -123,7 +139,8 @@ export function App() {
     setPending,
     setError,
     setStatus,
-    flash
+    flash,
+    resolveSql
   });
   const {
     connections, session, setSession, sessionRef, lastSessionRef,
@@ -139,7 +156,8 @@ export function App() {
     openConnection,
     getSelectionContext: () => queryContextApiRef.current?.selectionContext() ?? { catalog: undefined },
     askConfirm,
-    setResultPane
+    setResultPane,
+    resolveSql
   });
   tabsApiRef.current = tabsApi;
   const {
@@ -243,7 +261,7 @@ export function App() {
     sessionOfNode, connectionOfNode, sessionByName,
     loadTableNodes, firstTableContainer, parentTreeNode, loadChildren, treeChildren,
     askText, askConfirm, setError, setStatus, setPending,
-    objectTargetRef, objectTabIdRef
+    objectTargetRef, objectTabIdRef, resolveSql
   });
   objectApiRef.current = objects;
   const {
@@ -273,7 +291,6 @@ export function App() {
     setGridSelection(null);
     setInfoColumns([]);
     setInfoIndexes([]);
-    setLastCost(null);
     setError(null);
   }
 
@@ -323,8 +340,37 @@ export function App() {
 
   const editorContainer = useRef<HTMLDivElement | null>(null);
   const activeTabRef = useRef(activeTabId);
+  const lastSqlTabRef = useRef(activeTabId);
 
   activeTabRef.current = activeTabId;
+
+  /* 切标签：把上一个标签停在草稿里的内容落回状态，避免它带着旧值再次打开 */
+  useEffect(() => {
+    const previous = lastSqlTabRef.current;
+
+    lastSqlTabRef.current = activeTabId;
+
+    if (previous === activeTabId)
+      return;
+
+    const latest = sqlDraftRef.current.get(previous);
+
+    if (latest == null)
+      return;
+
+    window.clearTimeout(sqlSyncTimerRef.current);
+    setTabs(prev => prev.map(tab =>
+      tab.id === previous && tab.kind === "query" && tab.sql !== latest ? { ...tab, sql: latest } : tab));
+  }, [activeTabId, setTabs]);
+
+  /* 关闭的标签从草稿里清掉，避免长期积累 */
+  useEffect(() => {
+    const alive = new Set(tabs.map(tab => tab.id));
+
+    for (const id of sqlDraftRef.current.keys())
+      if (!alive.has(id))
+        sqlDraftRef.current.delete(id);
+  }, [tabs]);
 
   /* ------------------------------ 初始化 ------------------------------ */
 
@@ -376,23 +422,35 @@ export function App() {
     saveShortcutRef,
     activeTab,
     editorPanelRef,
+    resolveSql,
     onContentChange: value => {
       const tabId = activeTabRef.current;
 
-      setTabs(previous => previous.map(tab =>
-        tab.id === tabId && tab.kind === "query" ? { ...tab, sql: value } : tab));
+      /* 逐键只落草稿 ref，不触发重渲染；停顿后再同步回状态 */
+      sqlDraftRef.current.set(tabId, value);
+      window.clearTimeout(sqlSyncTimerRef.current);
+      sqlSyncTimerRef.current = window.setTimeout(() => {
+        const latest = sqlDraftRef.current.get(tabId);
+
+        if (latest == null)
+          return;
+
+        setTabs(previous => previous.map(tab =>
+          tab.id === tabId && tab.kind === "query" && tab.sql !== latest ? { ...tab, sql: latest } : tab));
+      }, 300);
     }
   });
 
   /* 查询执行域：执行 / 取消 / 执行计划 / 格式化 / progress 日志 */
   const {
-    stopQuery, formatActiveQuery, explainActiveQuery, runSelectionOrAll, logs, setLogs, lastCost, setLastCost
+    stopQuery, formatActiveQuery, explainActiveQuery, runSelectionOrAll
   } = useQueryExecution({
     tabs, updateTab, setTabs, activeTab, editorRef,
     resolveSessionByName: name => sessionByName(name),
     resolveSessionOfTab: tab => sessionOfTab(tab),
     setError, setStatus, setResultPane,
-    logLimit: settings.logLimit
+    logLimit: settings.logLimit,
+    resolveSql
   });
 
 
@@ -437,6 +495,7 @@ export function App() {
     gridKeyword, setGridKeyword, gridHits, setGridHits,
     gridFlash, setGridFlash,
     searchingGrid,
+    loadingMore, loadMoreRows,
     resultActions, gridMenuEntries,
     runResultAction, copyGridSelection
   } = useResultGrid({
@@ -488,8 +547,17 @@ export function App() {
   const menus = buildAppMenus(menuContext);
   useAppMenu(menus);
 
-  /* 当前标签在对象树里对应的节点（有才给「定位」按钮） */
-  const locatableNode = treeNodeOfTab(activeTab, treeChildren);
+  /*
+   * 当前标签在对象树里对应的节点（有才给「定位」按钮）。
+   * 这段会遍历整棵树；编辑器每次键入都会让 activeTab 变成新对象，
+   * 但 path / kind / id 引用不变，按它们做依赖即可避免逐键重扫。
+   */
+  const activeTabPath = activeTab?.kind === "query" ? activeTab.path : null;
+  const locatableNode = useMemo(
+    () => treeNodeOfTab(activeTab, treeChildren),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeTab?.id, activeTab?.kind, activeTabPath, treeChildren]
+  );
 
   /* 对象信息所属连接：数据 / 设计页按表取，查询控制台按标签记的连接取 */
   const infoSession = (activeTab?.kind === "query"
@@ -548,7 +616,7 @@ export function App() {
             onActivate={activateNode}
             onOpenData={openTableData}
             onDesign={openTableDesign}
-            onCopyName={node => void navigator.clipboard?.writeText(node.label)}
+            onCopyName={node => void writeClipboard(node.label)}
             menuFor={node => buildContextMenu(node, menuContext)}
           />
         </Panel>
@@ -577,6 +645,7 @@ export function App() {
             onTabContextMenu={id => void popupNativeMenu(buildTabMenuEntries(id, menuContext))}
             onCreateQuery={createQueryTab}
             onRefreshConnections={() => void refreshConnections()}
+            resolveSql={resolveSql}
             onShowAllTabs={() => void popupNativeMenu(tabs.map(tab => ({
               label: tab.id === activeTabId ? `● ${tab.title}` : tab.title,
               icon: tabIconName(tab),
@@ -666,7 +735,7 @@ export function App() {
                 activeTab={activeTab}
                 rows={rows}
                 columns={columns}
-                lastCost={lastCost}
+                lastCost={activeTab?.lastCost ?? null}
                 currentResult={currentResult}
                 pending={pending}
                 settings={settings}
@@ -683,6 +752,8 @@ export function App() {
                 gridFlash={gridFlash}
                 setGridHits={setGridHits}
                 setGridSelection={setGridSelection}
+                loadingMore={loadingMore}
+                onLoadMore={() => void loadMoreRows()}
                 onCellCommit={(row, col, value) => void runResultAction("result.update", { row, col, value }, "已修改（未提交）")}
                 onExport={format => void exportResult(format)}
                 onExplain={() => void explainActiveQuery()}
@@ -704,8 +775,8 @@ export function App() {
                 onSaveDesign={(cols, indexes) => activeTab?.kind === "design" && void saveTableDesign(activeTab.id, activeTab.node, cols, indexes)}
                 onReloadDesign={() => activeTab?.kind === "design" && void loadDesign(activeTab.id, activeTab.node)}
                 onApplyDdl={ddl => activeTab?.kind === "design" && void applyTableDdl(activeTab.id, activeTab.node, ddl)}
-                logs={logs}
-                setLogs={setLogs}
+                logs={activeTab?.logs ?? []}
+                setLogs={records => activeTab && updateTab(activeTab.id, { logs: records })}
                 copyText={copyText}
               />
             </Panel>
@@ -734,7 +805,7 @@ export function App() {
         currentDatabase={currentDatabase}
         tabKind={tabKindLabel(activeTab?.kind)}
         rows={rows.length}
-        lastCost={lastCost}
+        lastCost={activeTab?.lastCost ?? null}
         status={status}
         busy={busy}
       />

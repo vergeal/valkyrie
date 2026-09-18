@@ -26,7 +26,7 @@ public class StatementProxy implements Statement
         @Override
         public ResultSet executeQuery(String sql) throws SQLException {
                 hooks.forEach(h -> h.beforeExecute(sql));
-                LOG.info("executeQuery\n{}", sql);
+                LOG.debug("executeQuery\n{}", sql);
                 long startTime = System.currentTimeMillis();
                 var rs = statement.executeQuery(sql);
                 long endTime = System.currentTimeMillis();
@@ -38,7 +38,7 @@ public class StatementProxy implements Statement
         public int executeUpdate(String sql) throws SQLException {
 
                 hooks.forEach(h -> h.beforeExecute(sql));
-                LOG.info("executeUpdate\n{}", sql);
+                LOG.debug("executeUpdate\n{}", sql);
                 long startTime = System.currentTimeMillis();
                 var rs = statement.executeUpdate(sql);
                 long endTime = System.currentTimeMillis();
@@ -108,7 +108,7 @@ public class StatementProxy implements Statement
 
         @Override
         public boolean execute(String sql) throws SQLException {
-                LOG.info("execute\n{}", sql);
+                LOG.debug("execute\n{}", sql);
                 return statement.execute(sql);
         }
 
@@ -159,7 +159,7 @@ public class StatementProxy implements Statement
 
         @Override
         public void addBatch(String sql) throws SQLException {
-                LOG.info("addBatch\n{}", sql);
+                LOG.debug("addBatch\n{}", sql);
                 batchCount++;
                 statement.addBatch(sql);
         }
@@ -171,7 +171,7 @@ public class StatementProxy implements Statement
 
         @Override
         public int[] executeBatch() throws SQLException {
-                LOG.info("executeBatch, batch count: {}", batchCount);
+                LOG.debug("executeBatch, batch count: {}", batchCount);
                 return statement.executeBatch();
         }
 

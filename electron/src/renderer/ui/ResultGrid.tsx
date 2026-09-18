@@ -528,10 +528,26 @@ export function ResultGrid(props: ResultGridProps) {
     /*
      * 上报的选区要按「当前可见的行」算：搜索过滤时被隐藏的行不算在内，
      * 否则按范围做删除 / 置空会连带改掉看不见的数据。
+     *
+     * visibleRows 的 index 天然升序，用二分定位范围起点再顺序收集，
+     * 避免拖选时每一帧都对整个结果集做一遍 map + filter（大表拖选的主要卡点）。
      */
-    const rowList = visibleRows
-      .map(item => item.index)
-      .filter(index => index >= bounds.r1 && index <= bounds.r2);
+    const rowList: number[] = [];
+    let lo = 0;
+    let hi = visibleRows.length;
+
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+
+      if (visibleRows[mid].index < bounds.r1)
+        lo = mid + 1;
+      else
+        hi = mid;
+    }
+
+    for (let index = lo; index < visibleRows.length && visibleRows[index].index <= bounds.r2; index++)
+      rowList.push(visibleRows[index].index);
+
     const colList = Array.from({ length: bounds.c2 - bounds.c1 + 1 }, (_, offset) => bounds.c1 + offset);
 
     onSelectionChange?.({
@@ -667,6 +683,19 @@ export function ResultGrid(props: ResultGridProps) {
     return () => window.removeEventListener("mousedown", onMouseDown, true);
   }, [bubbleMode, editing]);
 
+  /*
+   * 开始框选前把焦点从编辑器 / 输入框上挪开。
+   * 单元格点击会 preventDefault，焦点不会自动转移，Monaco 的隐藏 textarea 仍占着
+   * document.activeElement；此时按 ⌘/Ctrl+C，复制逻辑会误判成「在编辑器里」，
+   * 于是复制不到结果表选区（表现就是有时灵、有时不灵）。
+   */
+  function releaseEditorFocus() {
+    const active = document.activeElement as HTMLElement | null;
+
+    if (active && active !== document.body && !active.closest?.(".grid-wrap"))
+      active.blur?.();
+  }
+
   /**
    * 单元格左键按下：无论当前是否在编辑、是否有菜单打开，
    * 都先落定（提交编辑/关菜单由外层组件负责），再开始新的框选。
@@ -680,6 +709,7 @@ export function ResultGrid(props: ResultGridProps) {
       return;
 
     event.preventDefault();
+    releaseEditorFocus();
 
     /* 正在编辑别的单元格：先提交再框选 */
     if (editing)
@@ -703,6 +733,7 @@ export function ResultGrid(props: ResultGridProps) {
       return;
 
     event.preventDefault();
+    releaseEditorFocus();
 
     /* 正在编辑别的单元格：先提交再改选区（与拖选一致） */
     if (editing)

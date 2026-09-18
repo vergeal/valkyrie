@@ -1,4 +1,5 @@
 import type { ProductMeta, QueryResultPayload, SavedConnection, SchemaNode, ScriptFile, TableColumn, TableIndex } from "../api";
+import type { LogRecord } from "../ui/LogConsole";
 
 /** 已打开连接的活动会话 */
 export interface SessionState {
@@ -12,6 +13,10 @@ export interface BaseTab {
   title: string;
   running: boolean;
   messages: string[];
+  /** 执行日志（按标签隔离：每个控制台各看各的） */
+  logs?: LogRecord[];
+  /** 最近一次执行的耗时（按标签隔离） */
+  lastCost?: number | null;
   /** 本次未提交的改动条数（编辑/新增/删除/设 NULL 累计），提交/回滚后清零 */
   pending?: number;
 }

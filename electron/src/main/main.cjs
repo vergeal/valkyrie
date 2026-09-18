@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeTheme, nativeImage } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeTheme, nativeImage, clipboard } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { execFile } = require("node:child_process");
@@ -17,6 +17,23 @@ if (!app.requestSingleInstanceLock()) {
 let bridge = null;
 let mainWindow = null;
 let splash = null;
+/* 启动是否最大化（从设置读） */
+let startMaximized = true;
+/* 主窗口渲染完成 / 数据层就绪：两者都好了才显示窗口，让渲染层解析与 JVM 启动并行 */
+let mainWindowReady = false;
+let dataReady = false;
+
+function revealMainWindow() {
+  if (!dataReady || !mainWindowReady || !mainWindow)
+    return;
+
+  if (startMaximized)
+    mainWindow.maximize();
+
+  mainWindow.show();
+  splash?.close();
+  splash = null;
+}
 
 function rendererEntry() {
   return path.join(__dirname, "..", "..", "dist", "renderer", "index.html");
@@ -175,8 +192,10 @@ function createWindow() {
 
   installApplicationMenu();
 
+  mainWindowReady = false;
+
   /* 读一下客户端设置：启动是否最大化（默认是） */
-  let startMaximized = true;
+  startMaximized = true;
 
   try {
     const settings = JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "settings.json"), "utf8"));
@@ -221,15 +240,10 @@ function createWindow() {
     callback(allowedPermissions.has(permission));
   });
 
-  /* 默认以最大化打开（先最大化再显示，避免先闪一下小窗口） */
+  /* 渲染完成 + 数据层就绪后才显示（先最大化再显示，避免先闪一下小窗口） */
   mainWindow.once("ready-to-show", () => {
-    if (startMaximized)
-      mainWindow.maximize();
-
-    mainWindow.show();
-    /* 主窗口出来了，启动卡片可以收掉 */
-    splash?.close();
-    splash = null;
+    mainWindowReady = true;
+    revealMainWindow();
   });
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -277,6 +291,11 @@ function registerIpc() {
 
   ipcMain.handle("valkyrie:invoke", async (_event, method, params) => {
     try {
+      /*
+       * 窗口与数据层并行启动：渲染层可能在 JVM 就绪前就发来第一批调用（刷新连接列表），
+       * 这里等 start() 完成再转发，调用方不会因为「数据层尚未就绪」而报错。
+       */
+      await bridge.start();
       return { ok: true, result: await bridge.call(method, params || {}) };
     } catch (error) {
       return { ok: false, error: error && error.message ? error.message : String(error) };
@@ -284,6 +303,16 @@ function registerIpc() {
   });
 
   registerWindowControls();
+
+  /*
+   * 写系统剪贴板：结果表 / 对象列表的复制走主进程。
+   * 渲染层的 navigator.clipboard.writeText 依赖「文档聚焦 + 用户激活」，
+   * 从原生菜单 / 快捷键转发过来时经常不满足，会偶发失败（复制了但偶尔没内容）。
+   */
+  ipcMain.handle("valkyrie:write-clipboard", (_event, text) => {
+    clipboard.writeText(String(text ?? ""));
+    return true;
+  });
 
   /* 导出另存为：由主进程弹系统对话框，返回用户选择的路径 */
   ipcMain.handle("valkyrie:choose-save-path", async (event, options) => {
@@ -502,7 +531,15 @@ app.whenReady().then(async () => {
   splash = createSplash();
   splash?.status("正在启动数据层…");
 
-  bridge = new JavaBridge();
+  bridge = new JavaBridge({
+    jvmArgs: [
+      /* 无界面运行，省掉 AWT/显示相关初始化 */
+      "-Djava.awt.headless=true",
+      /* AppCDS：首次运行生成类共享归档，之后启动直接映射，类加载更快 */
+      "-XX:+AutoCreateSharedArchive",
+      `-XX:SharedArchiveFile=${path.join(app.getPath("userData"), "valkyrie.jsa")}`
+    ]
+  });
 
   bridge.on("log", chunk => process.stderr.write(`[data-layer] ${chunk}`));
 
@@ -523,6 +560,12 @@ app.whenReady().then(async () => {
 
   registerIpc();
 
+  /*
+   * 先把窗口建起来（隐藏，不显示）：渲染层解析 4MB 级 bundle 与 JVM 启动并行，
+   * 而不是等数据层 ready 之后再开始，首屏等待明显缩短。
+   */
+  createWindow();
+
   try {
     await bridge.start();
   } catch (error) {
@@ -533,8 +576,9 @@ app.whenReady().then(async () => {
     return;
   }
 
+  dataReady = true;
   splash?.status("正在加载界面…");
-  createWindow();
+  revealMainWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0)

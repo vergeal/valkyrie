@@ -597,7 +597,8 @@ public class WorkBook implements Iterable<Row> {
      * @param file 目标可变文件对象
      */
     public void transferTo(UFile file) {
-        file.openByteWriter().call(writer -> writer.write(toByteArray()));
+        /* 直接写文件流，不再先序列化成一整份 byte[]（大表导出少一次整份内存拷贝） */
+        file.openByteWriter().call(this::write);
     }
 
     public byte[] toByteArray() {

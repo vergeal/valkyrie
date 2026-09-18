@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { TableColumn, TableIndex } from "../api";
+import { writeClipboard, type TableColumn, type TableIndex } from "../api";
 import { Icon } from "./icons";
 
 /** 设计器里的一行字段：原样发回数据层，改过名的带 originalName 让后端认出原来那一行 */
@@ -77,6 +77,30 @@ function toPayload<T extends { key: string }>(row: T): Omit<T, "key"> {
   return rest;
 }
 
+/**
+ * 逐字段浅比较两批行是否一致。
+ * 以前用 JSON.stringify 对比，每次编辑都要把所有行序列化一遍；字段值都是原始类型，浅比较即可。
+ */
+function sameRows<T extends { key: string }>(current: T[], baseline: T[]): boolean {
+  if (current.length !== baseline.length)
+    return false;
+
+  for (let index = 0; index < current.length; index++) {
+    const left = toPayload(current[index]) as Record<string, unknown>;
+    const right = toPayload(baseline[index]) as Record<string, unknown>;
+    const keys = Object.keys(left);
+
+    if (keys.length !== Object.keys(right).length)
+      return false;
+
+    for (const key of keys)
+      if (left[key] !== right[key])
+        return false;
+  }
+
+  return true;
+}
+
 export function TableDesign({ table, columns, indexes, ddl, loading, onSave, onConfirmRemove, onReload, onApply }: TableDesignProps) {
   const [active, setActive] = useState<DesignTab>("columns");
   const [columnRows, setColumnRows] = useState<ColumnRow[]>([]);
@@ -105,8 +129,7 @@ export function TableDesign({ table, columns, indexes, ddl, loading, onSave, onC
   useEffect(() => setEdited(ddl), [ddl, table]);
 
   const dirty = useMemo(
-    () => JSON.stringify(columnRows.map(toPayload)) !== JSON.stringify(baselineColumns.map(toPayload))
-      || JSON.stringify(indexRows.map(toPayload)) !== JSON.stringify(baselineIndexes.map(toPayload)),
+    () => !sameRows(columnRows, baselineColumns) || !sameRows(indexRows, baselineIndexes),
     [columnRows, indexRows, baselineColumns, baselineIndexes]
   );
 
@@ -233,7 +256,7 @@ export function TableDesign({ table, columns, indexes, ddl, loading, onSave, onC
   }
 
   async function copyDdl() {
-    await navigator.clipboard?.writeText(edited);
+    await writeClipboard(edited);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
   }

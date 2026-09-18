@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type * as monaco from "monaco-editor";
 import { invoke, messageOf, onEvent, type ProgressEvent, type QueryResultPayload } from "../api";
 import type { SessionState, WorkTab } from "../app/appTypes";
 import type { ResultPane } from "../app/appTypes";
 import { formatErrorLog, formatProgress } from "../app/format";
-import { appendLog, errorRecord, progressRecord, type LogRecord } from "../ui/LogConsole";
+import { appendLog, appendLogs, errorRecord, progressRecord, type LogRecord } from "../ui/LogConsole";
 
 interface UseQueryExecutionOptions {
   tabs: WorkTab[];
@@ -18,6 +18,8 @@ interface UseQueryExecutionOptions {
   setStatus: (message: string) => void;
   setResultPane: (pane: ResultPane) => void;
   logLimit: number;
+  /** 取标签的最新编辑器内容（内容可能还没同步进 tabs 状态） */
+  resolveSql?: (tab: WorkTab) => string;
 }
 
 /**
@@ -27,21 +29,75 @@ interface UseQueryExecutionOptions {
 export function useQueryExecution(options: UseQueryExecutionOptions) {
   const {
     tabs, updateTab, setTabs, activeTab, editorRef, resolveSessionByName, resolveSessionOfTab,
-    setError, setStatus, setResultPane, logLimit
+    setError, setStatus, setResultPane, logLimit, resolveSql
   } = options;
 
   const jobTabRef = useRef<Map<number, string>>(new Map());
   const runningJobRef = useRef<Map<string, number>>(new Map());
-  /* 语句执行报错写进日志面板，不再占用工作区顶部 */
-  const [logs, setLogs] = useState<LogRecord[]>([]);
-  const [lastCost, setLastCost] = useState<number | null>(null);
 
   /* 日志上限会用在只注册一次的事件回调里，用 ref 取最新值 */
   const logLimitRef = useRef(logLimit);
   logLimitRef.current = logLimit;
 
+  /*
+   * 进度事件按帧合并：批量脚本会在很短时间内推来大量事件，
+   * 逐个 setState 会让整棵组件树一帧内重渲染多次。这里先缓冲，rAF 里一次性落地。
+   */
+  const pendingProgressRef = useRef<{ line: string; record: LogRecord; cost: number | null; jobId?: number }[]>([]);
+  const flushFrameRef = useRef(0);
+
   useEffect(() => {
-    return onEvent((event: ProgressEvent) => {
+    const flush = () => {
+      flushFrameRef.current = 0;
+
+      const pending = pendingProgressRef.current;
+
+      if (pending.length === 0)
+        return;
+
+      pendingProgressRef.current = [];
+
+      /* 日志 / 消息 / 耗时都按「事件归属的标签」分组，面板因此每个控制台各看各的 */
+      const recordsByTab = new Map<string, LogRecord[]>();
+      const linesByTab = new Map<string, string[]>();
+      const costByTab = new Map<string, number>();
+
+      for (const item of pending) {
+        const tabId = item.jobId != null ? jobTabRef.current.get(item.jobId) : undefined;
+
+        if (!tabId)
+          continue;
+
+        const records = recordsByTab.get(tabId) ?? [];
+        records.push(item.record);
+        recordsByTab.set(tabId, records);
+
+        const lines = linesByTab.get(tabId) ?? [];
+        lines.push(item.line);
+        linesByTab.set(tabId, lines);
+
+        if (item.cost != null)
+          costByTab.set(tabId, item.cost);
+      }
+
+      setTabs(previous => previous.map(tab => {
+        const records = recordsByTab.get(tab.id);
+        const lines = linesByTab.get(tab.id);
+        const cost = costByTab.get(tab.id);
+
+        if (!records && !lines && cost == null)
+          return tab;
+
+        return {
+          ...tab,
+          logs: records ? appendLogs(tab.logs ?? [], records, logLimitRef.current) : tab.logs,
+          messages: lines ? [...tab.messages, ...lines] : tab.messages,
+          lastCost: cost != null ? cost : tab.lastCost
+        };
+      }));
+    };
+
+    const unsubscribe = onEvent((event: ProgressEvent) => {
       if (event.channel !== "query.progress")
         return;
 
@@ -51,16 +107,27 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       if (!line || !record)
         return;
 
-      if (event.kind === "cost" && event.detail)
-        setLastCost(Number(event.detail));
+      pendingProgressRef.current.push({
+        line,
+        record,
+        cost: event.kind === "cost" && event.detail ? Number(event.detail) : null,
+        jobId: event.jobId
+      });
 
-      setLogs(previous => appendLog(previous, record, logLimitRef.current));
-
-      const tabId = event.jobId != null ? jobTabRef.current.get(event.jobId) : undefined;
-
-      if (tabId)
-        setTabs(previous => previous.map(tab => tab.id === tabId ? { ...tab, messages: [...tab.messages, line] } : tab));
+      if (!flushFrameRef.current)
+        flushFrameRef.current = window.requestAnimationFrame(flush);
     });
+
+    return () => {
+      unsubscribe();
+
+      if (flushFrameRef.current) {
+        window.cancelAnimationFrame(flushFrameRef.current);
+        flushFrameRef.current = 0;
+      }
+
+      pendingProgressRef.current = [];
+    };
   }, [setTabs]);
 
   async function runQuery(tabId: string, sql: string) {
@@ -82,8 +149,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     runningJobRef.current.set(tabId, jobId);
     setError(null);
     setStatus("执行中…");
-    setLastCost(null);
-    updateTab(tabId, { running: true, messages: [] });
+    updateTab(tabId, { running: true, messages: [], lastCost: null });
     /* 执行期间先停留日志页，等真正有结果集再切到结果页 */
     setResultPane("log");
 
@@ -96,14 +162,20 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         schema: context.schema
       });
 
-      const rows = payload.rows?.length ?? 0;
-      const summary = payload.hasResultSet ? `返回 ${rows} 行` : "执行成功";
+      const loaded = payload.rows?.length ?? 0;
+      const total = payload.rowCount ?? loaded;
+      /* 结果超出首个窗口时说明总数，避免用户以为只有已加载的这么多行 */
+      const summary = payload.hasResultSet
+        ? (total > loaded ? `返回 ${total} 行（已加载 ${loaded} 行）` : `返回 ${loaded} 行`)
+        : "执行成功";
 
-      updateTab(tabId, {
+      /* 用函数式更新追加 summary：执行期间进度事件已往消息里写过内容，不能拿旧快照覆盖 */
+      setTabs(previous => previous.map(item => item.id === tabId ? {
+        ...item,
         result: payload,
         running: false,
-        messages: [...(tabs.find(tab => tab.id === tabId)?.messages ?? []), summary]
-      });
+        messages: [...item.messages, summary]
+      } : item));
       setStatus(summary);
 
       if (payload.hasResultSet)
@@ -111,16 +183,21 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     } catch (e) {
       const message = messageOf(e);
 
-      /* 语句执行失败：写进日志面板（不弹窗、不占工作区顶部） */
+      /* 语句执行失败：写进本控制台的日志 / 消息（不弹窗、不占工作区顶部） */
       const line = formatErrorLog(message);
 
-      setLogs(previous => appendLog(previous, errorRecord(message, jobId), logLimitRef.current));
+      setTabs(previous => previous.map(item => item.id === tabId ? {
+        ...item,
+        running: false,
+        messages: [...item.messages, line],
+        logs: appendLog(item.logs ?? [], errorRecord(message, jobId), logLimitRef.current)
+      } : item));
       setResultPane("log");
       setStatus("执行失败");
-      updateTab(tabId, { running: false, messages: [line] });
     } finally {
-      jobTabRef.current.delete(jobId);
       runningJobRef.current.delete(tabId);
+      /* 事件可能还在 rAF 缓冲里，稍后再删 jobId→标签 映射，避免最后一批日志 / 消息丢失 */
+      window.setTimeout(() => jobTabRef.current.delete(jobId), 1500);
     }
   }
 
@@ -143,8 +220,10 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     if (!activeTab || activeTab.kind !== "query")
       return;
 
+    const source = resolveSql ? resolveSql(activeTab) : activeTab.sql;
+
     try {
-      const payload = await invoke<{ sql: string }>("sql.format", { sql: activeTab.sql });
+      const payload = await invoke<{ sql: string }>("sql.format", { sql: source });
       const editor = editorRef.current;
       const model = editor?.getModel();
 
@@ -180,23 +259,33 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     setStatus("解析执行计划…");
 
     const jobId = Date.now();
+    const tabId = activeTab.id;
+    const source = resolveSql ? resolveSql(activeTab) : activeTab.sql;
+
+    /* 让 EXPLAIN 的进度事件也归到这个控制台，而不是落到公共日志里 */
+    jobTabRef.current.set(jobId, tabId);
 
     try {
       const payload = await invoke<QueryResultPayload>("query.execute", {
         sessionId: target.sessionId,
-        sql: `EXPLAIN ${activeTab.sql.replace(/;\s*$/, "")}`,
+        sql: `EXPLAIN ${source.replace(/;\s*$/, "")}`,
         jobId
       });
 
-      updateTab(activeTab.id, { plan: payload });
+      updateTab(tabId, { plan: payload });
       setStatus("执行计划已生成");
     } catch (e) {
-      /* 执行计划解析失败：同样写进日志面板 */
+      /* 执行计划解析失败：写进本控制台的日志面板 */
       const message = messageOf(e);
 
-      setLogs(previous => appendLog(previous, errorRecord(message, jobId), logLimitRef.current));
+      setTabs(previous => previous.map(item => item.id === tabId ? {
+        ...item,
+        logs: appendLog(item.logs ?? [], errorRecord(message, jobId), logLimitRef.current)
+      } : item));
       setResultPane("log");
       setStatus("执行计划解析失败");
+    } finally {
+      window.setTimeout(() => jobTabRef.current.delete(jobId), 1500);
     }
   }
 
@@ -209,7 +298,8 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     const selection = editor.getSelection();
     const selected = selection && !selection.isEmpty() ? editor.getModel()?.getValueInRange(selection) ?? "" : "";
 
-    await runQuery(activeTab.id, selected.trim() ? selected : activeTab.sql);
+    /* 没有选区就跑全文：直接用编辑器当前内容，避免读到还没同步进状态的旧值 */
+    await runQuery(activeTab.id, selected.trim() ? selected : editor.getValue());
   }
 
-  return { runQuery, stopQuery, formatActiveQuery, explainActiveQuery, runSelectionOrAll, logs, setLogs, lastCost, setLastCost };}
+  return { runQuery, stopQuery, formatActiveQuery, explainActiveQuery, runSelectionOrAll };}

@@ -59,6 +59,8 @@ class JavaBridge extends EventEmitter {
     this.javaCommand = options.javaCommand || resolveJavaCommand();
     this.jarPath = options.jarPath || resolveJarPath();
     this.startupTimeout = options.startupTimeout || 30000;
+    /* 额外的 JVM 参数（AppCDS / headless 等），由主进程按用户目录拼好后传入 */
+    this.jvmArgs = options.jvmArgs || [];
 
     this.child = null;
     this.starting = null;
@@ -76,7 +78,7 @@ class JavaBridge extends EventEmitter {
         return;
       }
 
-      const child = spawn(this.javaCommand, ["-jar", this.jarPath], {
+      const child = spawn(this.javaCommand, [...this.jvmArgs, "-jar", this.jarPath], {
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true
       });

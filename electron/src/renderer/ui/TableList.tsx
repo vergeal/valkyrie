@@ -65,6 +65,8 @@ function sortValue(node: SchemaNode, key: SortKey): string | number | null {
  */
 export function TableList(props: TableListProps) {
   const { tables, loading, filter, selectedNames, onSelectionChange, onOpen, onContextMenu, flashToken = 0 } = props;
+  /* 选中判断从 O(选中数) 的 includes 换成 Set，全选大列表时不再 O(N²) */
+  const selectedSet = useMemo(() => new Set(selectedNames), [selectedNames]);
   const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({ key: "name", direction: "asc" });
   const [refreshing, setRefreshing] = useState(false);
   /* Shift 连选时的锚点（按当前可见顺序的下标） */
@@ -145,7 +147,7 @@ export function TableList(props: TableListProps) {
     anchor.current = index;
 
     if (additive) {
-      onSelectionChange(selectedNames.includes(name)
+      onSelectionChange(selectedSet.has(name)
         ? selectedNames.filter(item => item !== name)
         : [...selectedNames, name]);
       return;
@@ -184,13 +186,13 @@ export function TableList(props: TableListProps) {
           {visible.map((node, index) => (
             <tr
               key={node.id}
-              className={selectedNames.includes(node.label) ? "is-active" : undefined}
+              className={selectedSet.has(node.label) ? "is-active" : undefined}
               onClick={event => selectRow(event, index)}
               onDoubleClick={() => onOpen(node)}
               onContextMenu={event => {
                 event.preventDefault();
 
-                if (!selectedNames.includes(node.label))
+                if (!selectedSet.has(node.label))
                   onSelectionChange([node.label]);
 
                 onContextMenu(node);

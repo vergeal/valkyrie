@@ -1,4 +1,4 @@
-import * as monaco from "monaco-editor";
+import * as monaco from "./monaco";
 import type { ThemeMode } from "../settings";
 
 /**
@@ -20,7 +20,7 @@ export function ensureGithubDarkTheme() {
       /* 语法色在 GitHub Dark 的基础上降一档饱和度：色相不变，长时间看不那么扎眼 */
       { token: "comment", foreground: "8b949e", fontStyle: "italic" },
       { token: "keyword", foreground: "e1938e" },
-      { token: "string", foreground: "b6d4ed" },
+      { token: "string", foreground: "a6bfd8" },
       { token: "number", foreground: "93bee4" },
       { token: "operator", foreground: "e1938e" },
       { token: "delimiter", foreground: "c9d1d9" },

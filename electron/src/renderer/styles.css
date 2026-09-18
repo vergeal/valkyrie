@@ -45,6 +45,8 @@
   /* 网格线比常规分割线更淡，长时间看数据不刺眼 */
   --grid-line: light-dark(#dbe1ea, #21262d);
   --green: light-dark(#15803d, #3fb950);
+  /* 字符串字面量专用：比 --green 更柔和，深色下长时间看不刺眼 */
+  --string: light-dark(#12793c, #8ec198);
   --amber: light-dark(#b45309, #d29922);
   --red: light-dark(#b91c1c, #f85149);
   --violet: light-dark(#6d28d9, #a371f7);
@@ -1108,7 +1110,7 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
 
 /* JSON token 配色，跟随明暗主题 */
 .json-edit-highlight .tok-key { color: light-dark(#0550ae, #79c0ff); }
-.json-edit-highlight .tok-string { color: light-dark(#0a7d33, #7ee787); }
+.json-edit-highlight .tok-string { color: var(--string); }
 .json-edit-highlight .tok-number { color: light-dark(#953800, #ffa657); }
 .json-edit-highlight .tok-literal { color: light-dark(#8250df, #d2a8ff); }
 .json-edit-highlight .tok-punct { color: var(--muted); }
@@ -2263,7 +2265,7 @@ table.table-list .table-name-text {
 
 /* SQL 着色：日志里也要一眼分清关键字 / 字面量 / 数字 / 注释 */
 .log-tok-key { color: var(--accent); font-weight: 600; }
-.log-tok-literal { color: var(--green); }
+.log-tok-literal { color: var(--string); }
 .log-tok-number { color: var(--violet); }
 .log-tok-comment { color: var(--muted); font-style: italic; }
 .log-tok-name { color: var(--text); }

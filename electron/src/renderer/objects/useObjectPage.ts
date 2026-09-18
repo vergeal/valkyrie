@@ -2,7 +2,7 @@ import { useState } from "react";
 import { invoke, messageOf, type SchemaNode, type ScriptFile } from "../api";
 import type { ObjectTab, ObjectTabTables, SessionState, WorkTab } from "../app/appTypes";
 import { OBJECT_TAB_TITLE } from "../app/appConstants";
-import { connectionOfTab, findObjectTab, newQueryTab, nextTabId } from "../tabs/tabHelpers";
+import { connectionOfTab, findObjectTab, newQueryTab, nextTabId, type SqlResolver } from "../tabs/tabHelpers";
 
 export interface ObjectTarget {
   view: "tables" | "scripts";
@@ -37,6 +37,8 @@ export interface UseObjectPageDeps {
   setPending: (value: string | null) => void;
   objectTargetRef: { current: Record<string, ObjectTarget> };
   objectTabIdRef: { current: string | null };
+  /** 取标签的最新编辑器内容（内容可能还没同步进 tabs 状态） */
+  resolveSql?: SqlResolver;
 }
 
 /**
@@ -49,7 +51,7 @@ export function useObjectPage(deps: UseObjectPageDeps) {
     tabs, setTabs, updateTab, setActiveTabId, activeTab,
     sessionOfNode, connectionOfNode, sessionByName, loadTableNodes, firstTableContainer, parentTreeNode,
     loadChildren, treeChildren, askText, askConfirm, setError, setStatus, setPending,
-    objectTargetRef, objectTabIdRef
+    objectTargetRef, objectTabIdRef, resolveSql
   } = deps;
 
   /* 「对象」页选中的行（按表名匹配：树与列表分属两次查询，节点 id 不同；支持多选） */
@@ -598,7 +600,8 @@ export function useObjectPage(deps: UseObjectPageDeps) {
     }
 
     const script = activeTab.script;
-    const content = activeTab.sql;
+    /* 内容可能还停在 draft ref（未同步进 tabs 状态），保存时取最新值 */
+    const content = resolveSql ? resolveSql(activeTab) : activeTab.sql;
     const catalog = activeTab.path.catalog ?? scriptCatalog();
     /* 已有脚本就存回它原本的数据库目录，避免另存为跑到别的库里去 */
     const target = script?.catalog ?? catalog;

@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { invoke, messageOf, type OpenConnectionPayload, type SavedConnection, type SchemaNode } from "../api";
 import type { SessionState, WorkTab } from "../app/appTypes";
-import { connectionOfTab, describeUnsaved, hasUnsaved } from "../tabs/tabHelpers";
+import { connectionOfTab, describeUnsaved, hasUnsaved, type SqlResolver } from "../tabs/tabHelpers";
 
 export interface ConnectionTabsApi {
   tabs: WorkTab[];
@@ -28,6 +28,8 @@ export interface ConnectionSessionsDeps {
   setError: (message: string | null) => void;
   setStatus: (message: string) => void;
   flash: (text: string) => void;
+  /** 取标签的最新编辑器内容（内容可能还没同步进 tabs 状态） */
+  resolveSql?: SqlResolver;
 }
 
 /**
@@ -37,7 +39,8 @@ export interface ConnectionSessionsDeps {
 export function useConnectionSessions(deps: ConnectionSessionsDeps) {
   const {
     tabsRef, focusObjectPage, objectTargetRef, setExpanded, setLoadingNodes, setActiveNode,
-    setCatalogOptions, clearUiOnDisconnect, askConfirm, setConnectionDialog, withBusy, setPending, setError, setStatus, flash
+    setCatalogOptions, clearUiOnDisconnect, askConfirm, setConnectionDialog, withBusy, setPending, setError, setStatus, flash,
+    resolveSql
   } = deps;
 
   const [connections, setConnections] = useState<SavedConnection[]>([]);
@@ -215,11 +218,11 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
       (tab.kind === "data" || tab.kind === "design") && tab.connection === target
       || tab.kind === "objects"
       || (tab.kind === "query" && tab.path.connection === target));
-    const unsaved = closingTabs.filter(hasUnsaved);
+    const unsaved = closingTabs.filter(tab => hasUnsaved(tab, resolveSql));
 
     if (!options.confirmed && unsaved.length > 0) {
       const confirmed = await askConfirm(
-        `连接 ${target} 上还有没保存的内容：\n${unsaved.map(describeUnsaved).join("\n")}\n\n关闭连接后这些改动会丢失，确定关闭吗？`,
+        `连接 ${target} 上还有没保存的内容：\n${unsaved.map(tab => describeUnsaved(tab, resolveSql)).join("\n")}\n\n关闭连接后这些改动会丢失，确定关闭吗？`,
         "未保存的修改",
         true
       );
@@ -251,7 +254,7 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
       .filter(tab => !((tab.kind === "data" || tab.kind === "design") && tab.connection === target))
       .filter(tab => !(tab.kind === "objects" && tab.connection === target))
       .map(tab => tab.kind === "query" && tab.path.connection === target
-        ? { ...tab, result: null, plan: null, messages: [], running: false, path: {} } as WorkTab
+        ? { ...tab, result: null, plan: null, messages: [], logs: [], lastCost: null, running: false, path: {} } as WorkTab
         : tab);
 
     tabsApi.setTabs(remaining);
@@ -327,11 +330,11 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
       return;
     }
 
-    const unsaved = tabs.filter(tab => hasUnsaved(tab) && names.includes(connectionOfTab(tab) ?? ""));
+    const unsaved = tabs.filter(tab => hasUnsaved(tab, resolveSql) && names.includes(connectionOfTab(tab) ?? ""));
 
     if (unsaved.length > 0) {
       const confirmed = await askConfirm(
-        `以下标签还有没保存的内容：\n${unsaved.map(describeUnsaved).join("\n")}\n\n关闭所有连接后这些改动会丢失，确定关闭吗？`,
+        `以下标签还有没保存的内容：\n${unsaved.map(tab => describeUnsaved(tab, resolveSql)).join("\n")}\n\n关闭所有连接后这些改动会丢失，确定关闭吗？`,
         "未保存的修改",
         true
       );

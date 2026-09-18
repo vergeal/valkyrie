@@ -176,25 +176,38 @@ export function computeCloseTabs(tabs: WorkTab[], mode: "current" | "left" | "ri
   return { next: tabs.filter((tab, position) => kept(tab, position)), index };
 }
 
+/*
+ * 编辑器内容为了性能不再逐键写进 tabs 状态，而是先落到一个 draft ref；
+ * 判断「有没有未保存修改」时用 sqlOf 取那份最新内容，取不到再退回 tab.sql。
+ */
+export type SqlResolver = (tab: WorkTab) => string;
+
+function sqlOfTab(tab: WorkTab, sqlOf?: SqlResolver): string {
+  if (tab.kind !== "query")
+    return "";
+
+  return sqlOf ? sqlOf(tab) : tab.sql;
+}
+
 /** 查询页绑定了脚本文件、且内容与上次保存的不一致 → 有未保存修改 */
-export function isScriptDirty(tab: WorkTab): boolean {
-  return tab.kind === "query" && Boolean(tab.script) && tab.savedSql != null && tab.savedSql !== tab.sql;
+export function isScriptDirty(tab: WorkTab, sqlOf?: SqlResolver): boolean {
+  return tab.kind === "query" && Boolean(tab.script) && tab.savedSql != null && tab.savedSql !== sqlOfTab(tab, sqlOf);
 }
 
 /** 这个标签关掉会丢东西吗：脚本没存盘 or 结果集里有未提交的修改 */
-export function hasUnsaved(tab: WorkTab): boolean {
-  return isScriptDirty(tab) || (tab.pending ?? 0) > 0;
+export function hasUnsaved(tab: WorkTab, sqlOf?: SqlResolver): boolean {
+  return isScriptDirty(tab, sqlOf) || (tab.pending ?? 0) > 0;
 }
 
-export function describeUnsaved(tab: WorkTab): string {
-  if (isScriptDirty(tab))
+export function describeUnsaved(tab: WorkTab, sqlOf?: SqlResolver): string {
+  if (isScriptDirty(tab, sqlOf))
     return `· ${tab.title}（脚本未保存）`;
 
   return `· ${tab.title}（${tab.pending ?? 0} 条未提交修改）`;
 }
 
-export function closingTabsNeedConfirm(tabs: WorkTab[]): WorkTab[] {
-  return tabs.filter(hasUnsaved);
+export function closingTabsNeedConfirm(tabs: WorkTab[], sqlOf?: SqlResolver): WorkTab[] {
+  return tabs.filter(tab => hasUnsaved(tab, sqlOf));
 }
 
 /** 状态栏右侧的页面类型文案 */

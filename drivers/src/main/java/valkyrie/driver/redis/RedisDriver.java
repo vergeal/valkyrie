@@ -47,8 +47,13 @@ public class RedisDriver extends Driver
                 return Integer.valueOf(label.substring(2, label.indexOf(" (")));
         }
 
+        /*
+         * Jedis 不是线程安全的，而 RpcServer 用多个工作线程调用同一个驱动实例。
+         * 这里把会用到 Jedis 的方法串行化（同一连接内的 Redis 操作本就无并行意义），
+         * 避免并发 select / sendCommand 把连接状态搞乱。
+         */
         @Override
-        public List<String> getCatalogs() {
+        public synchronized List<String> getCatalogs() {
                 List<String> catalogs = Lists.newArrayList();
                 int count = Integer.parseInt(jedis.configGet("databases").get("databases"));
 
@@ -63,7 +68,7 @@ public class RedisDriver extends Driver
         }
 
         @Override
-        public QueryResult execute(long jobId, Session session, SQL sql, SQLExecuteCallback callback)
+        public synchronized QueryResult execute(long jobId, Session session, SQL sql, SQLExecuteCallback callback)
         {
                 String currentCommandRef;
 

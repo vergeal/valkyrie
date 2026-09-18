@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SavedConnection } from "../api";
 import type { QueryTab, ResultPane, SessionState, WorkTab } from "../app/appTypes";
-import { computeCloseTabs, describeUnsaved, hasUnsaved, newQueryTab } from "./tabHelpers";
+import { computeCloseTabs, describeUnsaved, hasUnsaved, newQueryTab, type SqlResolver } from "./tabHelpers";
 
 interface UseTabsOptions {
   connections: SavedConnection[];
@@ -10,6 +10,8 @@ interface UseTabsOptions {
   getSelectionContext: () => { connection?: string; catalog?: string; schema?: string };
   askConfirm: (message: string, title?: string, danger?: boolean) => Promise<boolean>;
   setResultPane: (pane: ResultPane) => void;
+  /** 取标签的最新编辑器内容（内容可能还没同步进 tabs 状态） */
+  resolveSql?: SqlResolver;
 }
 
 /**
@@ -17,7 +19,7 @@ interface UseTabsOptions {
  * 标签内容本身由各 domain（查询 / 数据 / 设计 / 对象）维护。
  */
 export function useTabs(options: UseTabsOptions) {
-  const { connections, session, openConnection, getSelectionContext, askConfirm, setResultPane } = options;
+  const { connections, session, openConnection, getSelectionContext, askConfirm, setResultPane, resolveSql } = options;
 
   /* 启动时不预置标签，关闭后也不会自动补一个 */
   const [tabs, setTabs] = useState<WorkTab[]>([]);
@@ -81,11 +83,11 @@ export function useTabs(options: UseTabsOptions) {
     const { next, index } = plan;
     /* 被关掉的那些标签（对象页常驻，不参与关闭） */
     const closing = tabs.filter(tab => !next.some(item => item.id === tab.id));
-    const unsaved = closing.filter(hasUnsaved);
+    const unsaved = closing.filter(tab => hasUnsaved(tab, resolveSql));
 
     if (unsaved.length > 0) {
       const confirmed = await askConfirm(
-        `以下标签还有没保存的内容：\n${unsaved.map(describeUnsaved).join("\n")}\n\n关闭后改动会丢失，确定关闭吗？`,
+        `以下标签还有没保存的内容：\n${unsaved.map(tab => describeUnsaved(tab, resolveSql)).join("\n")}\n\n关闭后改动会丢失，确定关闭吗？`,
         "未保存的修改",
         true
       );

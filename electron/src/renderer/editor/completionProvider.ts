@@ -1,4 +1,4 @@
-import * as monaco from "monaco-editor";
+import * as monaco from "./monaco";
 import { invoke, type SuggestionItem } from "../api";
 
 export interface SuggestionContext {

@@ -96,6 +96,16 @@ export function appendLog(records: LogRecord[], record: LogRecord, limit = LOG_L
   return next.length > limit ? next.slice(-limit) : next;
 }
 
+/** 批量追加日志：一帧内合并多个事件时只复制一次数组 */
+export function appendLogs(records: LogRecord[], additions: LogRecord[], limit = LOG_LIMIT): LogRecord[] {
+  if (additions.length === 0)
+    return records;
+
+  const next = records.concat(additions);
+
+  return next.length > limit ? next.slice(-limit) : next;
+}
+
 /**
  * 进度事件 → 日志批次。
  *
@@ -326,6 +336,9 @@ export function LogConsole({ records, active, onClear, onCopy }: LogConsoleProps
   const [wrap, setWrap] = useState(true);
   const [follow, setFollow] = useState(true);
   const viewRef = useRef<HTMLDivElement | null>(null);
+  /* 复制回调每次渲染都是新闭包；用 ref 取最新，避免污染下方列表的 memo 依赖 */
+  const onCopyRef = useRef(onCopy);
+  onCopyRef.current = onCopy;
   /*
    * 程序自己贴底时写下的滚动位置，以及「下一次滚动事件是程序补发的」这个标记。
    *
@@ -358,6 +371,25 @@ export function LogConsole({ records, active, onClear, onCopy }: LogConsoleProps
   );
 
   const filtered = scope !== "all" || needle.length > 0;
+
+  /*
+   * 日志列表元素只在「可见 + 数据/筛选变化」时重建：不可见时直接返回 null，
+   * 避免查询执行期间日志事件触发整棵组件树重渲染时，隐藏的日志页也反复重建上千行 DOM。
+   * 元素引用稳定时 React 会跳过该子树的协调，切回日志页由 useLayoutEffect 重新贴底。
+   */
+  const viewContent = useMemo(() => {
+    if (!active)
+      return null;
+
+    if (batches.length === 0)
+      return <span className="empty">暂无日志</span>;
+
+    if (entries.length === 0)
+      return <span className="empty">没有匹配的日志</span>;
+
+    return entries.map(renderBatch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, batches, entries, needle]);
 
   /** 贴到最底部，并记住这次是程序自己滚的 */
   function pinToLatest() {
@@ -448,7 +480,7 @@ export function LogConsole({ records, active, onClear, onCopy }: LogConsoleProps
           className="log-act"
           title="复制这条语句"
           aria-label="复制这条语句"
-          onClick={() => onCopy(statementText(statement))}
+          onClick={() => onCopyRef.current(statementText(statement))}
         >
           <Icon name="copy" size={12} />
         </button>
@@ -469,7 +501,7 @@ export function LogConsole({ records, active, onClear, onCopy }: LogConsoleProps
           className="log-act"
           title="复制这条错误"
           aria-label="复制这条错误"
-          onClick={() => onCopy(`${stampOf(failure.time)} [ERROR] ${failure.message}`)}
+          onClick={() => onCopyRef.current(`${stampOf(failure.time)} [ERROR] ${failure.message}`)}
         >
           <Icon name="copy" size={12} />
         </button>
@@ -589,13 +621,7 @@ export function LogConsole({ records, active, onClear, onCopy }: LogConsoleProps
             setFollow(false);
         }}
       >
-        {batches.length === 0 ? (
-          <span className="empty">暂无日志</span>
-        ) : entries.length === 0 ? (
-          <span className="empty">没有匹配的日志</span>
-        ) : (
-          entries.map(renderBatch)
-        )}
+        {viewContent}
       </div>
 
       {!follow && batches.length > 0 && (

@@ -12,6 +12,7 @@
  *
  * 可选参数：
  *   --force-server   强制重建数据层
+ *   --force-renderer 强制重建界面
  *   --skip-server    跳过数据层检查（只改界面时最快）
  *   --skip-deps      跳过依赖检查
  */
@@ -32,6 +33,7 @@ const args = process.argv.slice(2);
 const forceServer = args.includes("--force-server");
 const skipServer = args.includes("--skip-server");
 const skipDeps = args.includes("--skip-deps");
+const forceRenderer = args.includes("--force-renderer");
 
 /* ------------------------------ 工具 ------------------------------ */
 
@@ -75,6 +77,40 @@ function newestSourceTime(directory) {
       if (entry.isDirectory()) {
         walk(full);
       } else if (/\.(java|xml)$/.test(entry.name)) {
+        const time = fs.statSync(full).mtimeMs;
+
+        if (time > newest)
+          newest = time;
+      }
+    }
+  };
+
+  walk(directory);
+  return newest;
+}
+
+/** 目录下（排除 node_modules / dist / 隐藏目录）任意文件的最新修改时间 */
+function newestFileTime(directory) {
+  let newest = 0;
+
+  const walk = current => {
+    let entries;
+
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.name === "node_modules" || entry.name === "dist" || entry.name.startsWith("."))
+        continue;
+
+      const full = path.join(current, entry.name);
+
+      if (entry.isDirectory()) {
+        walk(full);
+      } else {
         const time = fs.statSync(full).mtimeMs;
 
         if (time > newest)
@@ -155,6 +191,19 @@ function ensureServer() {
 }
 
 function buildRenderer() {
+  if (!forceRenderer && fs.existsSync(rendererEntry)) {
+    const entryTime = fs.statSync(rendererEntry).mtimeMs;
+    const sourceTime = Math.max(
+      newestFileTime(path.join(electronDir, "src")),
+      fs.statSync(path.join(electronDir, "vite.config.ts")).mtimeMs
+    );
+
+    if (entryTime > sourceTime) {
+      step("界面已是最新");
+      return;
+    }
+  }
+
   step("构建界面…");
   run("npm", ["run", "build:renderer"], { cwd: electronDir });
 }

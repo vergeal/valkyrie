@@ -79,16 +79,20 @@ async function main() {
     value: "改过的标题"
   });
 
-  console.log("修改缓冲 dirty:", updated.dirty, "→", updated.rows[0][1]);
+  console.log("修改缓冲 dirty:", updated.dirty, "→", JSON.stringify(updated.changed));
+
+  /* 分页：只取第 0 行，确认 rowCount / truncated 正确 */
+  const pages = await bridge.call("result.page", { jobId: editable.jobId, offset: 0, size: 1 });
+  console.log("分页 offset=0 size=1:", JSON.stringify(pages.rows), "rowCount:", pages.rowCount, "truncated:", pages.truncated);
 
   const committed = await bridge.call("result.commit", { jobId: editable.jobId });
   console.log("提交后:", JSON.stringify(committed.rows));
 
   const inserted = await bridge.call("result.insert", { jobId: editable.jobId });
-  console.log("新增空行后行数:", inserted.rows.length);
+  console.log("新增空行后行数:", inserted.rowCount, "变化:", JSON.stringify(inserted.changed));
 
   const deleted = await bridge.call("result.delete", { jobId: editable.jobId, rows: [0] });
-  console.log("删除首行后:", JSON.stringify(deleted.rows));
+  console.log("删除首行后 deletedRows:", JSON.stringify(deleted.deletedRows), "变化:", JSON.stringify(deleted.changed));
 
   /* 导出 CSV / Excel */
   const csvPath = path.join(os.tmpdir(), "valkyrie-export-smoke.csv");

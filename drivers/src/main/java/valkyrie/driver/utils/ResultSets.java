@@ -14,6 +14,7 @@ import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 结果集工具
@@ -27,6 +28,28 @@ public class ResultSets
         private static final String TIME_FORMAT_PATTERN = "yyyy-MM-dd HH:mm:ss";
 
         private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern(TIME_FORMAT_PATTERN);
+
+        /*
+         * 表的主键 / 列元数据：单表查询（含翻页）每次都要查数据库元数据，
+         * 但它跟「本页选了哪些列」无关，短期内也不会变，按 表 缓存一小段时间。
+         * 有 TTL，DDL 后最多 60 秒自动失效，不会长期用旧结构。
+         */
+        private static final long TABLE_META_TTL_MS = 60_000;
+        private static final int TABLE_META_CACHE_LIMIT = 256;
+        private static final Map<String, CachedTableMeta> TABLE_META_CACHE = new ConcurrentHashMap<>();
+
+        private record CachedTableMeta(Set<String> primaryKeys, Map<String, Map<String, Object>> columns, long at) {
+        }
+
+        /* 8 位二进制字符串查表，替代逐字节 String.format（BLOB 转文本时快很多） */
+        private static final String[] BINARY_BYTES = new String[256];
+
+        static {
+                for (int i = 0; i < 256; i++) {
+                        String bits = Integer.toBinaryString(i);
+                        BINARY_BYTES[i] = "0".repeat(8 - bits.length()) + bits;
+                }
+        }
 
         /**
          * 结果集转 QueryResultSet 对象
@@ -96,13 +119,21 @@ public class ResultSets
                 if (ps.isSingleTable()) {
                         DatabaseMetaData dbMeta = connection.getMetaData();
 
-                        Set<String> pks = new HashSet<>();
                         String singleTable = dialect.removeQuote(ps.getSingleTableName());
+                        String cacheKey = connection.getCatalog() + "|" + connection.getSchema() + "|" + singleTable;
+                        long now = System.currentTimeMillis();
+                        CachedTableMeta cached = TABLE_META_CACHE.get(cacheKey);
 
-                        try (ResultSet pk = dbMeta.getPrimaryKeys(connection.getCatalog(), connection.getSchema(), singleTable)) {
-                                while (pk.next())
-                                        pks.add(pk.getString("COLUMN_NAME"));
+                        if (cached == null || now - cached.at() > TABLE_META_TTL_MS) {
+                                cached = loadTableMeta(dbMeta, connection.getCatalog(), connection.getSchema(), singleTable, now);
+
+                                if (TABLE_META_CACHE.size() >= TABLE_META_CACHE_LIMIT)
+                                        TABLE_META_CACHE.clear();
+
+                                TABLE_META_CACHE.put(cacheKey, cached);
                         }
+
+                        Set<String> pks = cached.primaryKeys();
 
                         pks.forEach(c -> {
 
@@ -112,28 +143,7 @@ public class ResultSets
 
                         });
 
-                        Map<String, Map<String, Object>> columnInfo = new HashMap<>();
-
-                        try (ResultSet col = dbMeta.getColumns(connection.getCatalog(), connection.getSchema(), singleTable, "%")) {
-
-                                while (col.next()) {
-
-                                        Map<String, Object> m = new HashMap<>();
-
-                                        m.put("autoIncrement",
-                                                "YES".equals(col.getString("IS_AUTOINCREMENT")));
-
-                                        m.put("default",
-                                                col.getString("COLUMN_DEF"));
-
-                                        m.put("comment",
-                                                col.getString("REMARKS"));
-
-                                        columnInfo.put(col.getString("COLUMN_NAME"), m);
-
-                                }
-
-                        }
+                        Map<String, Map<String, Object>> columnInfo = cached.columns();
 
                         for (Column c : colMetas.values()) {
                                 Map<String, Object> m = columnInfo.get(c.getName());
@@ -156,6 +166,34 @@ public class ResultSets
 
                 queryResult.setEditable(editable);
                 queryResult.setColumns(Lists.newArrayList(colMetas.values()));
+        }
+
+        /** 读一次表的主键与列元数据（结果按表缓存，见 {@link #TABLE_META_CACHE}） */
+        private static CachedTableMeta loadTableMeta(DatabaseMetaData dbMeta, String catalog, String schema,
+                                                     String table, long now) throws SQLException
+        {
+                Set<String> pks = new HashSet<>();
+
+                try (ResultSet pk = dbMeta.getPrimaryKeys(catalog, schema, table)) {
+                        while (pk.next())
+                                pks.add(pk.getString("COLUMN_NAME"));
+                }
+
+                Map<String, Map<String, Object>> columnInfo = new HashMap<>();
+
+                try (ResultSet col = dbMeta.getColumns(catalog, schema, table, "%")) {
+                        while (col.next()) {
+                                Map<String, Object> m = new HashMap<>();
+
+                                m.put("autoIncrement", "YES".equals(col.getString("IS_AUTOINCREMENT")));
+                                m.put("default", col.getString("COLUMN_DEF"));
+                                m.put("comment", col.getString("REMARKS"));
+
+                                columnInfo.put(col.getString("COLUMN_NAME"), m);
+                        }
+                }
+
+                return new CachedTableMeta(pks, columnInfo, now);
         }
 
         private static String stringify(Object val, SimpleDateFormat sdf)
@@ -191,11 +229,11 @@ public class ResultSets
 
         private static String toBInary(byte[] bytes)
         {
-                StringBuilder sb = new StringBuilder();
-                for (byte b : bytes) {
-                        sb.append(String.format("%8s", Integer.toBinaryString(b & 0xFF))
-                                .replace(' ', '0'));
-                }
+                StringBuilder sb = new StringBuilder(bytes.length * 8);
+
+                for (byte b : bytes)
+                        sb.append(BINARY_BYTES[b & 0xFF]);
+
                 return sb.toString();
         }
 }

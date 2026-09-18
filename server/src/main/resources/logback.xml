@@ -14,7 +14,8 @@
 
     <logger name="com.zaxxer.hikari" level="WARN"/>
 
-    <logger name="valkyrie" level="DEBUG"/>
+    <!-- 业务代码默认 INFO：每条 SQL 的 DEBUG 日志不再写 stderr / 转发到前端控制台 -->
+    <logger name="valkyrie" level="INFO"/>
 
     <root level="INFO">
         <appender-ref ref="STDERR"/>

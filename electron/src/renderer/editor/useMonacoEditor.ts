@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
-import * as monaco from "monaco-editor";
+import * as monaco from "./monaco";
 import EditorWorker from "../editor.worker?worker";
 import { resolveFontFamily, type AppSettings } from "../settings";
 import type { WorkTab } from "../app/appTypes";
+import type { SqlResolver } from "../tabs/tabHelpers";
 import { DEFAULT_SQL } from "../app/appConstants";
 import { registerCompletionProvider, type SuggestionContext } from "./completionProvider";
 import { ensureGithubDarkTheme, resolveThemeMode } from "./editorTheme";
@@ -31,6 +32,8 @@ export interface UseMonacoEditorOptions {
   onContentChange: (value: string) => void;
   activeTab: WorkTab | null;
   editorPanelRef: Ref<PanelHandle | null>;
+  /** 取标签的最新编辑器内容（内容可能还没同步进 tabs 状态） */
+  resolveSql?: SqlResolver;
 }
 
 /**
@@ -38,7 +41,7 @@ export interface UseMonacoEditorOptions {
  * 补全 Provider / 快捷键命令 / 空格标记块装饰。
  */
 export function useMonacoEditor(options: UseMonacoEditorOptions) {
-  const { settings, containerRef, suggestionContextRef, runShortcutRef, formatShortcutRef, saveShortcutRef, onContentChange, activeTab, editorPanelRef } = options;
+  const { settings, containerRef, suggestionContextRef, runShortcutRef, formatShortcutRef, saveShortcutRef, onContentChange, activeTab, editorPanelRef, resolveSql } = options;
 
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const suppressChange = useRef(false);
@@ -325,7 +328,10 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
     if (!editor)
       return;
 
-    const sql = activeTab && activeTab.kind === "query" ? activeTab.sql : "";
+    /* 内容可能还停在 draft ref（未同步进 tabs 状态），这里取最新值，避免切回来被旧值覆盖 */
+    const sql = activeTab && activeTab.kind === "query"
+      ? (resolveSql ? resolveSql(activeTab) : activeTab.sql)
+      : "";
 
     if (editor.getValue() !== sql) {
       suppressChange.current = true;

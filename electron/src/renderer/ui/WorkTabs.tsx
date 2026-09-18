@@ -1,5 +1,5 @@
 import type { WorkTab } from "../app/appTypes";
-import { isScriptDirty, tabIconName } from "../tabs/tabHelpers";
+import { isScriptDirty, tabIconName, type SqlResolver } from "../tabs/tabHelpers";
 import { Icon } from "./icons";
 
 /** 工作区标签条：横向滚动、拖动排序、右键菜单、中键关闭、欢迎页。 */
@@ -17,10 +17,13 @@ export function WorkTabs(props: {
   onCreateQuery: () => void;
   onRefreshConnections: () => void;
   onShowAllTabs: () => void;
+  /** 取标签的最新编辑器内容（内容可能还没同步进 tabs 状态） */
+  resolveSql?: SqlResolver;
 }) {
   const {
     tabs, activeTabId, tabDrag, tabsOverflow, tabsRef, setTabDrag,
-    onSelectTab, onCloseTab, onMoveTab, onTabContextMenu, onCreateQuery, onRefreshConnections, onShowAllTabs
+    onSelectTab, onCloseTab, onMoveTab, onTabContextMenu, onCreateQuery, onRefreshConnections, onShowAllTabs,
+    resolveSql
   } = props;
 
   return (
@@ -109,7 +112,7 @@ export function WorkTabs(props: {
                 />
                 <span className="work-tab-title">{tab.title}</span>
                 {/* 脚本有未保存的修改 → 标题后面点一个小圆点 */}
-                {isScriptDirty(tab) && <span className="work-tab-dot" title="有未保存的修改" aria-label="有未保存的修改" />}
+                {isScriptDirty(tab, resolveSql) && <span className="work-tab-dot" title="有未保存的修改" aria-label="有未保存的修改" />}
               </button>
               {/* 「对象」列常驻，不给关闭按钮 */}
               {tab.kind !== "objects" && (

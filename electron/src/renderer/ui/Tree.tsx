@@ -77,6 +77,7 @@ function matches(node: SchemaNode, childrenMap: Record<string, SchemaNode[]>, ke
 
 export function Tree(props: TreeProps) {
   const { root, childrenMap, expanded, loading, activeId, filter, onToggle, onSelect, onActivate, menuFor } = props;
+
   function renderNode(node: SchemaNode) {
     if (!matches(node, childrenMap, filter))
       return null;
