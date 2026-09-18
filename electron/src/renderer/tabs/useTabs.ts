@@ -73,8 +73,8 @@ export function useTabs(options: UseTabsOptions) {
     return tab;
   }
 
-  /** 关闭标签：当前 / 左侧 / 右侧 / 全部（有没保存的脚本时先确认） */
-  async function closeTabs(mode: "current" | "left" | "right" | "all", id: string) {
+  /** 关闭标签：当前 / 其他 / 左侧 / 右侧 / 全部（有没保存的脚本时先确认） */
+  async function closeTabs(mode: "current" | "others" | "left" | "right" | "all", id: string) {
     const plan = computeCloseTabs(tabs, mode, id);
 
     if (!plan)

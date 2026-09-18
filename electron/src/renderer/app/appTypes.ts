@@ -28,6 +28,10 @@ export interface QueryTab extends BaseTab {
   savedSql?: string;
   result: QueryResultPayload | null;
   plan: QueryResultPayload | null;
+  /** 生成当前执行计划所用的 SQL（分析时引用原始语句） */
+  planSql?: string;
+  /** 生成执行计划时连接的数据类型（按库解析计划格式） */
+  planDbType?: string;
   dirtyRows: number[];
   /* 绑定到本地查询脚本文件时才有 */
   script?: { connection: string; catalog: string; name: string };

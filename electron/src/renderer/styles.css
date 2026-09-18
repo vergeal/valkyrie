@@ -2025,6 +2025,101 @@ table.table-list .table-name-text {
   color: var(--muted);
 }
 
+/* ------------------------------ 执行计划 ------------------------------ */
+
+/* 原始计划表格与计划分析同处一个面板，分析作为表格下方的区域 */
+.plan-analysis {
+  flex: 0 1 auto;
+  max-height: 50%;
+  overflow: auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.plan-analysis .plan-section-title { margin-bottom: 6px; }
+
+.plan-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.plan-findings {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plan-finding {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.plan-finding > svg { margin-top: 2px; flex: none; }
+.plan-finding.is-info > svg { color: #2563eb; }
+.plan-finding.is-warn > svg { color: #d97706; }
+.plan-finding.is-risk > svg { color: #dc2626; }
+
+.plan-finding-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.plan-finding-title { color: var(--text); }
+.plan-finding-detail { color: var(--muted); word-break: break-word; }
+
+.plan-suggestions {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.plan-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.plan-suggestion {
+  padding: 6px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--field);
+}
+
+.plan-suggestion-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.plan-suggestion-title { font-size: 13px; color: var(--text); }
+.plan-suggestion-detail { margin-top: 2px; font-size: 12.5px; color: var(--muted); }
+
+.plan-suggestion-sql {
+  display: block;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--chrome-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 /* ------------------------------ 执行日志 ------------------------------ */
 
 /*
@@ -2759,7 +2854,7 @@ table.script-list .table-name { min-width: 200px; max-width: 520px; }
 /* 代码 / 主题 / 用户 */
 .icon-code, .icon-layers, .icon-download, .icon-moon, .icon-sliders, .icon-user { color: var(--icon-violet); }
 /* 目录 / 键 / 锁 / 浅色主题 */
-.icon-folder, .icon-folderOpen, .icon-key, .icon-lock, .icon-sun { color: var(--icon-amber); }
+.icon-folder, .icon-folderOpen, .icon-key, .icon-lock, .icon-sun, .icon-zap { color: var(--icon-amber); }
 .icon-eraser { color: var(--icon-orange); }
 .icon-list, .icon-file { color: var(--icon-teal); }
 /* 关闭、密码可见性这类保持中性，避免整屏都在闪 */

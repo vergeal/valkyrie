@@ -9,10 +9,12 @@ import { NEXT_THEME, THEME_ICON, THEME_LABEL } from "./app/appConstants";
 import { useAppSettings } from "./app/useAppSettings";
 import { useAppTheme } from "./app/useAppTheme";
 import { useAppLifecycle } from "./app/useAppLifecycle";
+import { useCloseGuard } from "./app/useCloseGuard";
 import { useDialogs } from "./dialogs/useDialogs";
 import { useExport } from "./export/useExport";
 import { useResultGrid } from "./result/useResultGrid";
 import { useQueryExecution } from "./query/useQueryExecution";
+import { isQuerySql } from "./query/sqlText";
 import { useEditorShortcutRefs, useQueryShortcuts } from "./query/useQueryShortcuts";
 import { useMonacoEditor } from "./editor/useMonacoEditor";
 import { useTabs } from "./tabs/useTabs";
@@ -72,6 +74,8 @@ export function App() {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [showSide, setShowSide] = useState(true);
   const [showInfo, setShowInfo] = useState(true);
+  /* 编辑器当前（选区优先）是否为可分析的查询语句：决定工具栏「执行计划」是否可用 */
+  const [editorCanExplain, setEditorCanExplain] = useState(false);
 
   /* 客户端配置 / 主题 / Dialog / App 生命周期状态集中在各自 Hook 里 */
   const { settings, updateSettings } = useAppSettings();
@@ -165,6 +169,9 @@ export function App() {
     tabDrag, setTabDrag, tabsOverflow, tabsRef,
     updateTab, createQueryTab, openQueryTab, closeTabs, closeTab, updateQueryPath
   } = tabsApi;
+
+  /* 关闭窗口 / 退出前：先确认有没有未保存的标签页 */
+  useCloseGuard(tabs, resolveSql);
 
   /*
    * 「对象信息」看的是用户当前焦点：在数据表 / 设计页操作时跟着那张表走，
@@ -423,6 +430,8 @@ export function App() {
     activeTab,
     editorPanelRef,
     resolveSql,
+    onSelectionChange: state =>
+      setEditorCanExplain(previous => previous === state.canExplain ? previous : state.canExplain),
     onContentChange: value => {
       const tabId = activeTabRef.current;
 
@@ -675,6 +684,8 @@ export function App() {
             onRunSelectionOrAll={() => void runSelectionOrAll()}
             onStopQuery={() => void stopQuery()}
             onFormatQuery={() => void formatActiveQuery()}
+            onExplainQuery={() => void explainActiveQuery()}
+            canExplain={editorCanExplain}
             onUpdateQueryPath={updateQueryPath}
             onOpenConnection={connection => void openConnection(connection)}
             onOpenTableData={openTableData}
@@ -716,9 +727,13 @@ export function App() {
                   ref={editorContainer}
                   onContextMenu={event => {
                     event.preventDefault();
-                    const hasSelection = Boolean(editorRef.current && !editorRef.current.getSelection()?.isEmpty());
+                    const editor = editorRef.current;
+                    const selection = editor?.getSelection();
+                    const hasSelection = Boolean(selection && !selection.isEmpty());
+                    const selected = hasSelection ? editor?.getModel()?.getValueInRange(selection!) ?? "" : "";
+                    const text = selected.trim() ? selected : editor?.getValue() ?? "";
 
-                    void popupNativeMenu(buildEditorMenuEntries(hasSelection, menuContext));
+                    void popupNativeMenu(buildEditorMenuEntries({ hasSelection, isQuery: isQuerySql(text) }, menuContext));
                   }}
                 />
               </div>

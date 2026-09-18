@@ -3,6 +3,7 @@ import type { ResultPane as ResultPaneKind, WorkTab } from "../app/appTypes";
 import type { GridSelection } from "../result/resultHelpers";
 import type { AppSettings } from "../settings";
 import { ResultGrid } from "./ResultGrid";
+import { PlanPane } from "./PlanPane";
 import { TableList } from "./TableList";
 import { ScriptList } from "./ScriptList";
 import { TableDesign, type DesignColumn, type DesignIndex } from "./TableDesign";
@@ -87,7 +88,11 @@ export function ResultPane(props: {
         </button>
         {/* 没有结果集的查询不展示执行计划 */}
         {activeTab?.kind === "query" && (activeTab.result?.hasResultSet || activeTab.plan) && (
-          <button type="button" className={`result-tab${resultPane === "plan" ? " is-active" : ""}`} onClick={onExplain}>
+          <button
+            type="button"
+            className={`result-tab${resultPane === "plan" ? " is-active" : ""}`}
+            onClick={() => (activeTab.plan ? setResultPane("plan") : onExplain())}
+          >
             执行计划
           </button>
         )}
@@ -326,9 +331,11 @@ export function ResultPane(props: {
         )}
 
         {resultPane === "plan" && !pageTab && (
-          <ResultGrid
-            columns={activeTab?.kind === "query" ? activeTab.plan?.columns ?? [] : []}
-            rows={activeTab?.kind === "query" ? activeTab.plan?.rows ?? [] : []}
+          <PlanPane
+            plan={activeTab?.kind === "query" ? activeTab.plan : null}
+            sql={activeTab?.kind === "query" ? activeTab.planSql : undefined}
+            dbType={activeTab?.kind === "query" ? activeTab.planDbType : undefined}
+            onCopy={copyText}
           />
         )}
 

@@ -209,6 +209,10 @@ declare global {
       invoke: (method: string, params?: Record<string, unknown>) => Promise<InvokeResponse<unknown>>;
       onEvent: (callback: (params: ProgressEvent) => void) => () => void;
       windowControl?: (action: "minimize" | "maximize" | "close") => void;
+      /** 主进程拦下关闭 / 退出，请求渲染层确认未保存内容 */
+      onCloseRequest?: (callback: () => void) => () => void;
+      /** 回传关闭确认结果：true 继续关闭，false 取消 */
+      confirmClose?: (shouldClose: boolean) => void;
       onWindowState?: (callback: (state: { maximized: boolean }) => void) => () => void;
       onShortcut?: (callback: (action: string) => void) => () => void;
       /** 写系统剪贴板（走主进程，避免 navigator.clipboard 的聚焦 / 用户激活限制） */
@@ -253,6 +257,16 @@ export function onEvent(callback: (params: ProgressEvent) => void): () => void {
 
 export function windowControl(action: "minimize" | "maximize" | "close"): void {
   window.valkyrie?.windowControl?.(action);
+}
+
+/** 订阅主进程的「准备关闭」请求（渲染层据此确认未保存内容） */
+export function onCloseRequest(callback: () => void): () => void {
+  return window.valkyrie?.onCloseRequest?.(callback) ?? (() => undefined);
+}
+
+/** 回传关闭确认结果 */
+export function confirmClose(shouldClose: boolean): void {
+  window.valkyrie?.confirmClose?.(shouldClose);
 }
 
 export function onWindowState(callback: (state: { maximized: boolean }) => void): () => void {

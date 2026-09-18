@@ -27,6 +27,9 @@ export function WorkPaneToolbar(props: {
   onRunSelectionOrAll: () => void;
   onStopQuery: () => void;
   onFormatQuery: () => void;
+  onExplainQuery: () => void;
+  /** 当前编辑器（选区优先）是否为可分析的查询语句 */
+  canExplain: boolean;
   onUpdateQueryPath: (patch: Partial<QueryTab["path"]>) => void;
   onOpenConnection: (connection: SavedConnection) => void;
   onOpenTableData: (node: SchemaNode) => void;
@@ -46,7 +49,7 @@ export function WorkPaneToolbar(props: {
   const {
     tabsEmpty, locatableNode, activeTab, sessionName, connections, catalogOptions, schemaOptions, tableNodes,
     rows, columns, pending, scriptSelections, objectSelections, scriptFilter, setScriptFilter, tableFilter, setTableFilter,
-    onReveal, onRunSelectionOrAll, onStopQuery, onFormatQuery, onUpdateQueryPath, onOpenConnection,
+    onReveal, onRunSelectionOrAll, onStopQuery, onFormatQuery, onExplainQuery, canExplain, onUpdateQueryPath, onOpenConnection,
     onOpenTableData, onOpenTableDesign, onCreateScript, onOpenScriptFile, onRenameScriptFile, onRevealPath,
     onDeleteScriptFiles, onRefreshScriptList, onCreateTableDraft, onRefreshTableList, onLoadPage, onGridFlash, onLoadDesign
   } = props;
@@ -91,6 +94,15 @@ export function WorkPaneToolbar(props: {
           <span className="tbtn-sep" aria-hidden="true" />
           <button type="button" className="tbtn" onClick={onFormatQuery}>
             <Icon name="code" />格式化
+          </button>
+          <button
+            type="button"
+            className="tbtn"
+            disabled={!canExplain || activeTab.running}
+            title="执行计划（查询语句）"
+            onClick={onExplainQuery}
+          >
+            <Icon name="zap" />执行计划
           </button>
           <span className="toolbar-text">
             {activeTab.running ? "执行中…" : `${activeTab.sql.split("\n").length} 行`}

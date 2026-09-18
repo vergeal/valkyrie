@@ -7,6 +7,7 @@ import type { SqlResolver } from "../tabs/tabHelpers";
 import { DEFAULT_SQL } from "../app/appConstants";
 import { registerCompletionProvider, type SuggestionContext } from "./completionProvider";
 import { ensureGithubDarkTheme, resolveThemeMode } from "./editorTheme";
+import { isQuerySql } from "../query/sqlText";
 
 (self as unknown as { MonacoEnvironment: unknown }).MonacoEnvironment = {
   getWorker: () => new EditorWorker()
@@ -34,6 +35,19 @@ export interface UseMonacoEditorOptions {
   editorPanelRef: Ref<PanelHandle | null>;
   /** 取标签的最新编辑器内容（内容可能还没同步进 tabs 状态） */
   resolveSql?: SqlResolver;
+  /** 选区 / 内容变化：报告当前（选区优先）是否为可分析的查询语句 */
+  onSelectionChange?: (state: { hasSelection: boolean; canExplain: boolean }) => void;
+}
+
+/** 当前编辑器里「要分析的 SQL」：有选区取选区，否则取全文，并判断是否为查询语句 */
+function editorQueryState(editor: monaco.editor.IStandaloneCodeEditor): { hasSelection: boolean; canExplain: boolean } {
+  const selection = editor.getSelection();
+  const hasSelection = Boolean(selection && !selection.isEmpty());
+  const text = hasSelection && selection
+    ? editor.getModel()?.getValueInRange(selection) ?? ""
+    : editor.getValue();
+
+  return { hasSelection, canExplain: isQuerySql(text) };
 }
 
 /**
@@ -41,7 +55,7 @@ export interface UseMonacoEditorOptions {
  * 补全 Provider / 快捷键命令 / 空格标记块装饰。
  */
 export function useMonacoEditor(options: UseMonacoEditorOptions) {
-  const { settings, containerRef, suggestionContextRef, runShortcutRef, formatShortcutRef, saveShortcutRef, onContentChange, activeTab, editorPanelRef, resolveSql } = options;
+  const { settings, containerRef, suggestionContextRef, runShortcutRef, formatShortcutRef, saveShortcutRef, onContentChange, activeTab, editorPanelRef, resolveSql, onSelectionChange } = options;
 
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const suppressChange = useRef(false);
@@ -51,6 +65,8 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
   settingsRef.current = settings;
   const onContentChangeRef = useRef(onContentChange);
   onContentChangeRef.current = onContentChange;
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -118,6 +134,8 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
         return;
 
       onContentChangeRef.current(editor.getValue());
+      /* 输入过程中首关键字可能刚好凑成查询语句，同步一次按钮可用态 */
+      onSelectionChangeRef.current?.(editorQueryState(editor));
     });
 
     /*
@@ -203,6 +221,9 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
     editor.onDidChangeCursorSelection(event => {
       if (!event.selection.isEmpty())
         clearIndentMark();
+
+      /* 选区变化会影响「执行计划」按钮的可用态（选中的不是查询语句就禁用） */
+      onSelectionChangeRef.current?.(editorQueryState(editor));
     });
 
     const completionProvider = registerCompletionProvider(() => suggestionContextRef.current);
@@ -346,6 +367,9 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
 
     if (activeTab?.kind === "query")
       editor.layout();
+
+    /* 切标签 / 换内容后同步一次「执行计划」按钮可用态 */
+    onSelectionChangeRef.current?.(editorQueryState(editor));
   }, [activeTab]);
 
   return { editorRef, suppressChange };

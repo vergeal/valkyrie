@@ -5,6 +5,7 @@ import type { SessionState, WorkTab } from "../app/appTypes";
 import type { ResultPane } from "../app/appTypes";
 import { formatErrorLog, formatProgress } from "../app/format";
 import { appendLog, appendLogs, errorRecord, progressRecord, type LogRecord } from "../ui/LogConsole";
+import { explainStatement, isQuerySql } from "./sqlText";
 
 interface UseQueryExecutionOptions {
   tabs: WorkTab[];
@@ -149,7 +150,8 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     runningJobRef.current.set(tabId, jobId);
     setError(null);
     setStatus("执行中…");
-    updateTab(tabId, { running: true, messages: [], lastCost: null });
+    /* 重新执行时丢弃上一份执行计划，避免面板里显示与当前 SQL 不符的旧分析 */
+    updateTab(tabId, { running: true, messages: [], lastCost: null, plan: null, planSql: undefined, planDbType: undefined });
     /* 执行期间先停留日志页，等真正有结果集再切到结果页 */
     setResultPane("log");
 
@@ -255,12 +257,26 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     if (!target || !activeTab || activeTab.kind !== "query")
       return;
 
+    /* 有选中就分析选中的那段 SQL，否则分析整个编辑器内容 */
+    const source = selectedOrFullSql().trim();
+
+    if (!source) {
+      setError("没有可分析的 SQL");
+      return;
+    }
+
+    if (!isQuerySql(source)) {
+      setError("仅查询语句（SELECT / SHOW / WITH 等）支持执行计划");
+      return;
+    }
+
+    const dbType = target.product.type;
+
     setResultPane("plan");
     setStatus("解析执行计划…");
 
     const jobId = Date.now();
     const tabId = activeTab.id;
-    const source = resolveSql ? resolveSql(activeTab) : activeTab.sql;
 
     /* 让 EXPLAIN 的进度事件也归到这个控制台，而不是落到公共日志里 */
     jobTabRef.current.set(jobId, tabId);
@@ -268,11 +284,11 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     try {
       const payload = await invoke<QueryResultPayload>("query.execute", {
         sessionId: target.sessionId,
-        sql: `EXPLAIN ${source.replace(/;\s*$/, "")}`,
+        sql: explainStatement(source, dbType),
         jobId
       });
 
-      updateTab(tabId, { plan: payload });
+      updateTab(tabId, { plan: payload, planSql: source, planDbType: dbType });
       setStatus("执行计划已生成");
     } catch (e) {
       /* 执行计划解析失败：写进本控制台的日志面板 */
@@ -287,6 +303,19 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     } finally {
       window.setTimeout(() => jobTabRef.current.delete(jobId), 1500);
     }
+  }
+
+  /** 编辑器有选区就取选区，否则取整篇内容；编辑器缺失时退回标签里保存的 SQL */
+  function selectedOrFullSql(): string {
+    const editor = editorRef.current;
+
+    if (!editor)
+      return activeTab?.kind === "query" ? (resolveSql ? resolveSql(activeTab) : activeTab.sql) : "";
+
+    const selection = editor.getSelection();
+    const selected = selection && !selection.isEmpty() ? editor.getModel()?.getValueInRange(selection) ?? "" : "";
+
+    return selected.trim() ? selected : editor.getValue();
   }
 
   async function runSelectionOrAll() {

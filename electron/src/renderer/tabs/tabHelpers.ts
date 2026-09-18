@@ -153,23 +153,25 @@ export function moveTabInList(previous: WorkTab[], from: string, to: string, aft
  * 计算「关闭标签」后的结果。返回 null 表示这次操作无效（对象页不能被关 / 找不到）。
  * 只做纯计算，未保存确认与 state 落位由调用方负责。
  */
-export function computeCloseTabs(tabs: WorkTab[], mode: "current" | "left" | "right" | "all", id: string): { next: WorkTab[]; index: number } | null {
+export function computeCloseTabs(tabs: WorkTab[], mode: "current" | "others" | "left" | "right" | "all", id: string): { next: WorkTab[]; index: number } | null {
   const index = tabs.findIndex(tab => tab.id === id);
 
   if (index < 0)
     return null;
 
-  /* 对象列是常驻页：不能被关闭，也不会被"关闭左侧/右侧/全部"带走（断连时随连接一起收走） */
+  /* 对象列是常驻页：不能被关闭，也不会被"关闭其他/左侧/右侧/全部"带走（断连时随连接一起收走） */
   if (mode === "current" && tabs[index].kind === "objects")
     return null;
 
   const keep = mode === "current"
     ? (tab: WorkTab) => tab.id !== id
-    : mode === "left"
-      ? (_tab: WorkTab, position: number) => position >= index
-      : mode === "right"
-        ? (_tab: WorkTab, position: number) => position <= index
-        : () => false;
+    : mode === "others"
+      ? (_tab: WorkTab, position: number) => position === index
+      : mode === "left"
+        ? (_tab: WorkTab, position: number) => position >= index
+        : mode === "right"
+          ? (_tab: WorkTab, position: number) => position <= index
+          : () => false;
 
   const kept = (tab: WorkTab, position: number) => tab.kind === "objects" || keep(tab, position);
 

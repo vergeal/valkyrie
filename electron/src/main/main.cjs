@@ -22,6 +22,13 @@ let startMaximized = true;
 /* 主窗口渲染完成 / 数据层就绪：两者都好了才显示窗口，让渲染层解析与 JVM 启动并行 */
 let mainWindowReady = false;
 let dataReady = false;
+/*
+ * 关闭 / 退出前的未保存确认：主进程先拦下关闭，转给渲染层检查；
+ * closeApproved 为 true 才真正放行（渲染层确认后回传）。
+ */
+let closeApproved = false;
+let pendingQuit = false;
+let stopRequested = false;
 
 function revealMainWindow() {
   if (!dataReady || !mainWindowReady || !mainWindow)
@@ -193,6 +200,9 @@ function createWindow() {
   installApplicationMenu();
 
   mainWindowReady = false;
+  /* 每次新建窗口都是一次全新的关闭确认流程（macOS 关窗不退出，重开窗口后仍要检查） */
+  closeApproved = false;
+  pendingQuit = false;
 
   /* 读一下客户端设置：启动是否最大化（默认是） */
   startMaximized = true;
@@ -249,6 +259,16 @@ function createWindow() {
     mainWindow = null;
   });
 
+  /* 点关闭（标题栏 / 菜单「退出」）先经渲染层确认未保存标签，确认后才真正关闭 */
+  mainWindow.on("close", event => {
+    if (closeApproved)
+      return;
+
+    event.preventDefault();
+    pendingQuit = false;
+    requestCloseConfirmation();
+  });
+
   disableBrowserShortcuts(mainWindow);
 
   attachWindowState(mainWindow);
@@ -303,6 +323,31 @@ function registerIpc() {
   });
 
   registerWindowControls();
+
+  /*
+   * 渲染层对「准备关闭」的回应：确认则放行，取消则维持现状。
+   * 来自退出流程（pendingQuit）时继续 app.quit()，否则关掉当前窗口。
+   */
+  ipcMain.on("valkyrie:close-response", (event, shouldClose) => {
+    const target = BrowserWindow.fromWebContents(event.sender);
+
+    if (!shouldClose) {
+      pendingQuit = false;
+      return;
+    }
+
+    if (closeApproved)
+      return;
+
+    closeApproved = true;
+
+    if (pendingQuit) {
+      pendingQuit = false;
+      app.quit();
+    } else if (target && !target.isDestroyed()) {
+      target.close();
+    }
+  });
 
   /*
    * 写系统剪贴板：结果表 / 对象列表的复制走主进程。
@@ -591,14 +636,42 @@ app.on("window-all-closed", () => {
     app.quit();
 });
 
-let stopping = false;
+/**
+ * 请求渲染层确认是否可以关闭：渲染层检查未保存标签后回传结果。
+ * 窗口 / 渲染进程不可用（启动期、已销毁）时直接放行，避免关不掉。
+ */
+function requestCloseConfirmation() {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) {
+    closeApproved = true;
+
+    if (pendingQuit) {
+      pendingQuit = false;
+      app.quit();
+    } else if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.close();
+    }
+
+    return;
+  }
+
+  mainWindow.webContents.send("valkyrie:close-request");
+}
 
 app.on("before-quit", event => {
-  if (stopping || !bridge)
+  /* 已在停止流程里 / 数据层没起来：不再拦截 */
+  if (stopRequested || !bridge)
     return;
 
+  /* 还没经过渲染层确认：先拦下，问过再退 */
+  if (!closeApproved) {
+    event.preventDefault();
+    pendingQuit = true;
+    requestCloseConfirmation();
+    return;
+  }
+
   event.preventDefault();
-  stopping = true;
+  stopRequested = true;
 
   bridge.stop().finally(() => app.quit());
 });

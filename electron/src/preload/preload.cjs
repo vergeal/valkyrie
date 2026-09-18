@@ -23,6 +23,20 @@ contextBridge.exposeInMainWorld("valkyrie", {
   /* 自绘标题栏的窗口控制 */
   windowControl: action => ipcRenderer.send("valkyrie:window", action),
 
+  /*
+   * 关闭窗口 / 退出前的未保存确认：主进程拦下关闭并请求渲染层检查，
+   * 渲染层弹原生对话框后把「是否继续关闭」回传主进程。
+   */
+  onCloseRequest: callback => {
+    const listener = () => callback();
+
+    ipcRenderer.on("valkyrie:close-request", listener);
+
+    return () => ipcRenderer.off("valkyrie:close-request", listener);
+  },
+
+  confirmClose: shouldClose => ipcRenderer.send("valkyrie:close-response", Boolean(shouldClose)),
+
   onWindowState: callback => {
     const listener = (_event, state) => callback(state);
 

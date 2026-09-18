@@ -73,7 +73,7 @@ export interface MenuContext {
   selectAllInPage: () => void;
   copyText: (text: string) => void;
   revealPath: (path: string) => void;
-  closeTabs: (mode: "current" | "left" | "right" | "all", id: string) => void;
+  closeTabs: (mode: "current" | "others" | "left" | "right" | "all", id: string) => void;
   revealTreeNode: (node: SchemaNode) => void;
 }
 
@@ -324,7 +324,14 @@ export function buildObjectMenu(node: SchemaNode, ctx: MenuContext): MenuEntry[]
 }
 
 /* 编辑器右键菜单：与 JavaFX 版顺序一致（按右键时的选区状态现算） */
-export function buildEditorMenuEntries(hasSelection: boolean, ctx: MenuContext): MenuEntry[] {
+export interface EditorMenuState {
+  /** 当前是否有选区 */
+  hasSelection: boolean;
+  /** 当前选区（无选区时取全文）是否为查询语句，决定是否给出「执行计划」 */
+  isQuery: boolean;
+}
+
+export function buildEditorMenuEntries(state: EditorMenuState, ctx: MenuContext): MenuEntry[] {
   if (ctx.activeTab?.kind !== "query")
     return [];
 
@@ -333,10 +340,14 @@ export function buildEditorMenuEntries(hasSelection: boolean, ctx: MenuContext):
       label: "运行已选择",
       accelerator: ACCEL.run,
       icon: "play",
-      disabled: !hasSelection || ctx.activeTab.running,
+      disabled: !state.hasSelection || ctx.activeTab.running,
       action: () => void ctx.runSelectionOrAll()
     },
     { label: "美化已选择", icon: "code", action: () => void ctx.formatActiveQuery() },
+    /* 只有查询语句才给执行计划：非查询（DDL / DML）EXPLAIN 无意义 */
+    ...(state.isQuery
+      ? [{ label: "执行计划", icon: "zap", action: () => void ctx.explainActiveQuery() }]
+      : []),
     { separator: true },
     { label: "复制", accelerator: ACCEL.copy, action: () => ctx.editorRef.current?.trigger("menu", "editor.action.clipboardCopyAction", null) },
     { label: "剪切", accelerator: ACCEL.cut, action: () => ctx.editorRef.current?.trigger("menu", "editor.action.clipboardCutAction", null) },
@@ -370,6 +381,11 @@ export function buildTabMenuEntries(id: string, ctx: MenuContext): MenuEntry[] {
     { label: "关闭", disabled: tabs[index].kind === "objects", action: () => void ctx.closeTabs("current", id) },
     { label: "关闭左侧标签", disabled: index === 0, action: () => void ctx.closeTabs("left", id) },
     { label: "关闭右侧标签", disabled: index === tabs.length - 1, action: () => void ctx.closeTabs("right", id) },
+    {
+      label: "关闭其他标签",
+      disabled: !tabs.some((tab, position) => position !== index && tab.kind !== "objects"),
+      action: () => void ctx.closeTabs("others", id)
+    },
     { separator: true },
     { label: "全部关闭", action: () => void ctx.closeTabs("all", id) }
   ];
