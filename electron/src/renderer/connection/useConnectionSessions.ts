@@ -116,6 +116,10 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
       setRoots(nodes ?? []);
       setExpanded(previous => new Set(previous).add(`conn:${connection.name}`));
 
+      /* 从别的连接切过来：对象树里上一处的选中属于原来那条连接，留着会让新建查询 / 信息面板张冠李戴 */
+      if (session?.name !== connection.name)
+        setActiveNode(null);
+
       /* 切过去了，「对象」页也得跟着换成这条连接的内容 */
       if (options.focusPage !== false)
         void focusObjectPage(connection.name, { session: opened, roots: nodes ?? [] });

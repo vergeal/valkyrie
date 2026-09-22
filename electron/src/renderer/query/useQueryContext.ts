@@ -117,9 +117,12 @@ export function useQueryContext(deps: QueryContextDeps) {
 
     setTabs(previous => previous.map(tab =>
       tab.kind === "query" && !tab.path.catalog
+        /* 只给「没有连接」或「就属于当前活动连接」的查询页补默认库：
+           别的连接的查询页再拿这条连接的库去补，执行时就会拿错库 */
+        && (!tab.path.connection || tab.path.connection === session?.name)
         ? { ...tab, path: { ...tab.path, catalog: roots[0].label } }
         : tab));
-  }, [roots, setTabs]);
+  }, [roots, setTabs, session?.name]);
 
   /* 切换数据库：加载模式列表与表列表 */
   useEffect(() => {
@@ -200,9 +203,21 @@ export function useQueryContext(deps: QueryContextDeps) {
     };
   }, [session, activeSchema, schemaOptions]);
 
-  /** 选中节点 → 执行上下文：连接名 + 数据库 + 模式 */
+  /**
+   * 选中节点 → 执行上下文：连接名 + 数据库 + 模式。
+   *
+   * 新建的查询控制台必须钉在某条连接上：`path.connection` 为空时，执行会退回到
+   * 当前活动会话。连着打开 A、B 之后，本该跑在 A 上的查询就会跑到 B 上（报找不到表）。
+   * 所以没选中可归属的节点时补上活动连接；树里残留的选中若属于别的连接，也不能拿来用。
+   */
   function selectionContext(): { connection?: string; catalog?: string; schema?: string } {
-    return selectionContextHelper(activeNode, catalogOptions, treeRoot, treeChildren);
+    const context = selectionContextHelper(activeNode, catalogOptions, treeRoot, treeChildren);
+    const activeName = session?.name;
+
+    if (activeName && context.connection && context.connection !== activeName)
+      return { connection: activeName, catalog: catalogOptions[0]?.label };
+
+    return { ...context, connection: context.connection ?? activeName };
   }
 
   return {
