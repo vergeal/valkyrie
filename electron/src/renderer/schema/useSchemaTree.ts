@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke, messageOf, type TableColumn, type TableIndex, type SavedConnection, type SchemaNode } from "../api";
 import type { ObjectTab, SessionState, WorkTab } from "../app/appTypes";
 import { affectsTabOnNodeClose, connectionOfTab } from "../tabs/tabHelpers";
@@ -43,6 +43,12 @@ export function useSchemaTree(deps: SchemaTreeDeps) {
   const [childrenMap, setChildrenMap] = useState<Record<string, SchemaNode[]>>({});
   const [infoColumns, setInfoColumns] = useState<TableColumn[]>([]);
   const [infoIndexes, setInfoIndexes] = useState<TableIndex[]>([]);
+  /*
+   * 同一个节点正在加载的子节点请求：展开与「选中联动读表」几乎同时触发，
+   * 两次 schema.children 会各返回一套新 id，互相覆盖会让已展开的子节点失效。
+   * 这里按节点 id 复用同一个请求。
+   */
+  const inFlightRef = useRef<Record<string, Promise<SchemaNode[]>>>({});
 
   const treeRoot = useMemo<SchemaNode>(() => ({
     id: "conn-root",
@@ -92,33 +98,50 @@ export function useSchemaTree(deps: SchemaTreeDeps) {
     if (cached && !force)
       return cached;
 
+    /* 同一个节点已有在途请求：直接等它，别再发一次（会返回另一套 id） */
+    const pending = inFlightRef.current[node.id];
+
+    if (pending && !force)
+      return pending;
+
     setLoadingNodes(previous => new Set(previous).add(node.id));
 
+    const request = (async () => {
+      try {
+        const payload = await invoke<{ nodes: SchemaNode[] }>("schema.children", {
+          sessionId,
+          nodeId: node.id
+        });
+
+        /* 把 catalog / schema 继承给子节点，便于后续分页、取表结构 */
+        const children = payload.nodes.map(child => ({
+          ...child,
+          catalog: child.catalog ?? node.catalog ?? (node.kind === "CATALOG" ? node.label : undefined),
+          schema: child.schema ?? node.schema ?? (node.kind === "SCHEMA" ? node.label : undefined)
+        }));
+
+        setChildrenMap(previous => ({ ...previous, [node.id]: children }));
+
+        return children;
+      } catch (e) {
+        setError(messageOf(e));
+        return [];
+      } finally {
+        setLoadingNodes(previous => {
+          const next = new Set(previous);
+          next.delete(node.id);
+          return next;
+        });
+      }
+    })();
+
+    inFlightRef.current[node.id] = request;
+
     try {
-      const payload = await invoke<{ nodes: SchemaNode[] }>("schema.children", {
-        sessionId,
-        nodeId: node.id
-      });
-
-      /* 把 catalog / schema 继承给子节点，便于后续分页、取表结构 */
-      const children = payload.nodes.map(child => ({
-        ...child,
-        catalog: child.catalog ?? node.catalog ?? (node.kind === "CATALOG" ? node.label : undefined),
-        schema: child.schema ?? node.schema ?? (node.kind === "SCHEMA" ? node.label : undefined)
-      }));
-
-      setChildrenMap(previous => ({ ...previous, [node.id]: children }));
-
-      return children;
-    } catch (e) {
-      setError(messageOf(e));
-      return [];
+      return await request;
     } finally {
-      setLoadingNodes(previous => {
-        const next = new Set(previous);
-        next.delete(node.id);
-        return next;
-      });
+      if (inFlightRef.current[node.id] === request)
+        delete inFlightRef.current[node.id];
     }
   }
 
@@ -164,12 +187,22 @@ export function useSchemaTree(deps: SchemaTreeDeps) {
       return;
     }
 
-    setExpanded(previous => new Set(previous).add(node.id));
+    /* 按节点自己的连接取会话：拿活动会话去读别的连接的节点会报「节点不存在」 */
+    const owner = sessionOfNode(node);
 
-    if (childrenMap[node.id] || loadingNodes.has(node.id))
+    if (!owner) {
+      setError("请先在左侧选择一个连接");
       return;
+    }
 
-    await loadChildren(sessionOfNode(node)?.sessionId ?? "", node);
+    /*
+     * 先把下一级读回来再展开：展开时子节点已经在手，不会出现「箭头翻了、
+     * 里面却空一会儿」；节点在加载中会显示转圈（loadChildren 会标记 loadingNodes）。
+     */
+    if (!childrenMap[node.id] && !loadingNodes.has(node.id))
+      await loadChildren(owner.sessionId, node);
+
+    setExpanded(previous => new Set(previous).add(node.id));
   }
 
   /**

@@ -520,8 +520,13 @@ export function App() {
   }, [activeTab]);
 
   const rows = activeTab && "result" in activeTab ? activeTab.result?.rows ?? [] : [];
-  const productLabel = session ? `${session.product.productName ?? ""} ${session.product.version ?? ""}`.trim() : "-";
-  const currentDatabase = activeNode?.catalog ?? "-";
+  /* 状态栏 / 标题栏也按查询标签自己的连接显示，别显示成活动连接 */
+  const consoleConnectionName = activeTab?.kind === "query" ? connectionOfTab(activeTab) : undefined;
+  const displaySession = consoleConnectionName ? openSessions[consoleConnectionName] ?? null : session;
+  const productLabel = displaySession ? `${displaySession.product.productName ?? ""} ${displaySession.product.version ?? ""}`.trim() : "-";
+  const currentDatabase = activeTab?.kind === "query"
+    ? activeTab.path.catalog ?? "-"
+    : activeNode?.catalog ?? "-";
 
   /* ------------------------------ 结果集编辑 ------------------------------ */
 
@@ -616,7 +621,7 @@ export function App() {
   return (
     <div className={`app${settings.gridZebra ? "" : " no-zebra"}${settings.gridRowNumbers ? "" : " no-rownum"}${IS_MAC ? " is-mac" : ""}${themeResolved === "dark" ? " is-dark" : " is-light"}`}>
       <AppTitlebar
-        sessionName={session?.name ?? null}
+        sessionName={activeTabConnectionName}
         currentDatabase={currentDatabase}
         maximized={maximized}
       />
@@ -859,7 +864,7 @@ export function App() {
       </Group>
 
       <AppStatusBar
-        sessionName={session?.name ?? null}
+        sessionName={activeTabConnectionName}
         productLabel={productLabel}
         currentDatabase={currentDatabase}
         tabKind={tabKindLabel(activeTab?.kind)}

@@ -278,11 +278,14 @@ export function useObjectPage(deps: UseObjectPageDeps) {
 
   /** 打开脚本文件（对象树里的脚本节点与「脚本」页共用一条路径） */
   async function openScriptFile(file: { name: string; catalog: string; connection?: string }) {
-    /* 脚本页属于某个连接，打开时要按它的连接读，不能跟着当前活动会话 */
-    const owner = file.connection ? sessionByName(file.connection) : session;
+    /*
+     * 脚本属于某个连接，打开时必须用那一条：显式指定连接却没开时直接报错，
+     * 绝不能退回活动会话 —— 否则点 A 的脚本会开成 B 的控制台。
+     */
+    const owner = file.connection ? openSessions[file.connection] : session;
 
     if (!owner) {
-      setError("请先在左侧选择一个连接");
+      setError(file.connection ? `连接 ${file.connection} 未打开，无法打开脚本` : "请先在左侧选择一个连接");
       return;
     }
 
@@ -318,11 +321,33 @@ export function useObjectPage(deps: UseObjectPageDeps) {
     }
   }
 
+  /**
+   * 树节点没归到连接时，按数据库名在已打开连接里找一条（同名优先活动会话那条）。
+   * 节点 id 作废（树刷新过）会让 connectionOfNode 落空，这里兜底，避免开成别的连接。
+   */
+  function connectionByCatalog(catalog?: string): string | undefined {
+    if (!catalog)
+      return undefined;
+
+    const matches = Object.entries(rootsByConnection)
+      .filter(([, nodes]) => nodes.some(item => item.label === catalog))
+      .map(([name]) => name);
+
+    return matches.find(name => name === sessionRef.current?.name) ?? matches[0];
+  }
+
   async function openScript(node: SchemaNode) {
+    const connection = connectionOfNode(node) ?? connectionByCatalog(node.catalog);
+
+    if (!connection) {
+      setError("无法确定脚本所属连接，请先在左侧选择连接后再打开");
+      return;
+    }
+
     await openScriptFile({
       name: node.label,
       catalog: node.catalog ?? "default",
-      connection: connectionOfNode(node)
+      connection
     });
   }
 
@@ -363,7 +388,7 @@ export function useObjectPage(deps: UseObjectPageDeps) {
       if (listTab?.view === "scripts")
         void refreshScriptList(listTab.id);
 
-      await openScriptFile({ name: fileName, catalog });
+      await openScriptFile({ name: fileName, catalog, connection: active.name });
       setStatus(`已创建脚本 ${fileName}`);
     } catch (e) {
       setError(messageOf(e));
