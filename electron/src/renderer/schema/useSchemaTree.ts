@@ -196,27 +196,44 @@ export function useSchemaTree(deps: SchemaTreeDeps) {
     }
 
     /*
-     * 先把下一级读回来再展开：展开时子节点已经在手，不会出现「箭头翻了、
-     * 里面却空一会儿」。已在途的请求由 loadChildren 复用（返回同一个 Promise），
-     * 这里不能再按 loadingNodes 跳过，否则会在内容没回来时就展开。
+     * 整个「打开」过程都标记为加载中：展开要等下一级（乃至容器的下一级）读回来，
+     * 期间节点上转个圈，用户知道在忙；读完才展开。
      */
-    const children = childrenMap[node.id] ?? await loadChildren(owner.sessionId, node);
+    setLoadingNodes(previous => new Set(previous).add(node.id));
 
-    /*
-     * 库 / 模式下还挂着「数据表」「查询脚本」容器：把它们的下一级也读回来再展开。
-     * 否则展开后容器节点还在转圈（双击打开表列表时尤其明显），得等它们加载完。
-     */
-    if (node.kind === "CATALOG" || node.kind === "SCHEMA") {
-      const containers = children.filter(child =>
-        (child.kind === "TABLE" && child.hasChildren && !child.table) || child.kind === "QUERY");
+    try {
+      /*
+       * 先把下一级读回来再展开：展开时子节点已经在手，不会出现「箭头翻了、
+       * 里面却空一会儿」。已在途的请求由 loadChildren 复用（返回同一个 Promise），
+       * 这里不能再按 loadingNodes 跳过，否则会在内容没回来时就展开。
+       */
+      const children = childrenMap[node.id] ?? await loadChildren(owner.sessionId, node);
 
-      await Promise.all(containers.map(container =>
-        childrenMap[container.id]
-          ? Promise.resolve(childrenMap[container.id])
-          : loadChildren(owner.sessionId, container).catch(() => [])));
+      /* loadChildren 结束时清了标记，继续标着「展开中」去装容器内容 */
+      setLoadingNodes(previous => new Set(previous).add(node.id));
+
+      /*
+       * 库 / 模式下还挂着「数据表」「查询脚本」容器：把它们的下一级也读回来再展开。
+       * 否则展开后容器节点还在转圈（双击打开表列表时尤其明显），得等它们加载完。
+       */
+      if (node.kind === "CATALOG" || node.kind === "SCHEMA") {
+        const containers = children.filter(child =>
+          (child.kind === "TABLE" && child.hasChildren && !child.table) || child.kind === "QUERY");
+
+        await Promise.all(containers.map(container =>
+          childrenMap[container.id]
+            ? Promise.resolve(childrenMap[container.id])
+            : loadChildren(owner.sessionId, container).catch(() => [])));
+      }
+
+      setExpanded(previous => new Set(previous).add(node.id));
+    } finally {
+      setLoadingNodes(previous => {
+        const next = new Set(previous);
+        next.delete(node.id);
+        return next;
+      });
     }
-
-    setExpanded(previous => new Set(previous).add(node.id));
   }
 
   /**
