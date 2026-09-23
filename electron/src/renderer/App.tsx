@@ -28,6 +28,7 @@ import {
   sessionOfTab as sessionOfTabHelper
 } from "./connection/connectionHelpers";
 import {
+  connectionOfTab,
   moveTabInList,
   tabIconName,
   tabKindLabel,
@@ -135,7 +136,6 @@ export function App() {
     setExpanded,
     setLoadingNodes,
     setActiveNode,
-    setCatalogOptions: nodes => queryContextApiRef.current?.setCatalogOptions(nodes),
     clearUiOnDisconnect,
     askConfirm,
     setConnectionDialog,
@@ -233,7 +233,7 @@ export function App() {
 
   /* 执行上下文域：数据库 / 模式 / 表候选 + SQL 补全上下文 */
   const queryContext = useQueryContext({
-    session, connections, roots, tabs, setTabs, activeTab, activeNode,
+    session, openSessions, rootsByConnection, connections, roots, tabs, setTabs, activeTab, activeNode,
     loadChildren, treeRoot, treeChildren, lastSessionRef
   });
   queryContextApiRef.current = queryContext;
@@ -242,6 +242,46 @@ export function App() {
     schemaOptions, setSchemaOptions, tableNodes, setTableNodes,
     suggestionContextRef
   } = queryContext;
+
+  /*
+   * 查询控制台是「按标签带自己的连接」的（同 FX 版每个查询页各有一套 PathSelector）：
+   * 打开 / 切到这个查询标签时，把活动连接切到它所属的连接。
+   * 否则顶部「连接 / 数据库 / 模式」候选都取自活动连接，先开 A、B 再从 A 的脚本打开控制台，
+   * 界面上会显示成 B 的连接和库，选库执行自然就报找不到表。
+   */
+  function activateConnectionOfTab(tab: WorkTab | null) {
+    if (tab?.kind !== "query")
+      return;
+
+    const name = connectionOfTab(tab);
+    const owned = name ? openSessions[name] : undefined;
+
+    if (!name || !owned || owned.sessionId === session?.sessionId)
+      return;
+
+    setSession(owned);
+
+    const ownedRoots = rootsByConnection[name];
+
+    if (ownedRoots) {
+      setRoots(ownedRoots);
+      setCatalogOptions(ownedRoots);
+    }
+
+    setSchemaOptions([]);
+    setTableNodes([]);
+  }
+
+  /* 程序化打开 / 关闭标签后活动标签变了：活动连接跟着新标签走 */
+  useEffect(() => {
+    activateConnectionOfTab(activeTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabId]);
+
+  /* 查询页顶部的「连接」选择器显示查询标签自己的连接，活动连接只是兜底 */
+  const activeTabConnectionName = activeTab?.kind === "query"
+    ? connectionOfTab(activeTab) ?? session?.name ?? null
+    : session?.name ?? null;
 
   /*
    * 查询控制台没有对应的表对象，信息主体改看顶部选的模式 / 数据库；
@@ -320,7 +360,7 @@ export function App() {
   /* 对象树交互：选中 / 双击 / 定位 / 刷新 */
   const { revealTreeNode, selectTreeNode, activateNode, refreshNode } = useSchemaActions({
     setActiveNode, setExpanded, openSessions, session, setSession, rootsByConnection,
-    setRoots, setCatalogOptions, setSchemaOptions, setTableNodes,
+    setRoots, setSchemaOptions, setTableNodes,
     connectionOfNode, sessionOfNode, parentTreeNode, loadChildren, toggleNode,
     focusObjectPage, showScriptList, showTableList, openScript, openScriptList, openTableList,
     openTableData, openTableDesign, refreshConnectionRoots, refreshConnections, withBusy,
@@ -648,7 +688,11 @@ export function App() {
             tabsOverflow={tabsOverflow}
             tabsRef={tabsRef}
             setTabDrag={setTabDrag}
-            onSelectTab={setActiveTabId}
+            onSelectTab={id => {
+              setActiveTabId(id);
+              /* 点已激活的那个标签不会触发 activeTabId 变化，这里补一次连接跟随 */
+              activateConnectionOfTab(tabs.find(tab => tab.id === id) ?? null);
+            }}
             onCloseTab={closeTab}
             onMoveTab={(from, to, after) => setTabs(previous => moveTabInList(previous, from, to, after))}
             onTabContextMenu={id => void popupNativeMenu(buildTabMenuEntries(id, menuContext))}
@@ -666,7 +710,7 @@ export function App() {
             tabsEmpty={tabs.length === 0}
             locatableNode={locatableNode}
             activeTab={activeTab}
-            sessionName={session?.name ?? null}
+            sessionName={activeTabConnectionName}
             connections={connections}
             catalogOptions={catalogOptions}
             schemaOptions={schemaOptions}

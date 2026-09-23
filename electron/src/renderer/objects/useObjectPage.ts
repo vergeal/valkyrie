@@ -331,7 +331,7 @@ export function useObjectPage(deps: UseObjectPageDeps) {
     if (activeNode?.kind === "CATALOG")
       return activeNode.label;
 
-    return activeNode?.catalog ?? catalogOptions[0]?.label ?? "default";
+    return activeNode?.catalog ?? roots[0]?.label ?? "default";
   }
 
   /** 新建脚本：问到名字后写进当前上下文所在的数据库目录，并直接打开 */

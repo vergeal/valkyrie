@@ -9,7 +9,6 @@ export interface SchemaActionsDeps {
   setSession: (session: SessionState | null) => void;
   rootsByConnection: Record<string, SchemaNode[]>;
   setRoots: (nodes: SchemaNode[]) => void;
-  setCatalogOptions: (nodes: SchemaNode[]) => void;
   setSchemaOptions: (nodes: SchemaNode[]) => void;
   setTableNodes: (nodes: SchemaNode[]) => void;
   connectionOfNode: (node: SchemaNode | null | undefined) => string | undefined;
@@ -40,7 +39,7 @@ export interface SchemaActionsDeps {
 export function useSchemaActions(deps: SchemaActionsDeps) {
   const {
     setActiveNode, setExpanded, openSessions, session, setSession, rootsByConnection,
-    setRoots, setCatalogOptions, setSchemaOptions, setTableNodes,
+    setRoots, setSchemaOptions, setTableNodes,
     connectionOfNode, sessionOfNode, parentTreeNode, loadChildren, toggleNode,
     focusObjectPage, showScriptList, showTableList, openScript, openScriptList, openTableList,
     openTableData, openTableDesign, refreshConnectionRoots, refreshConnections, withBusy,
@@ -99,7 +98,6 @@ export function useSchemaActions(deps: SchemaActionsDeps) {
     if (owned && owned.sessionId !== session?.sessionId) {
       setSession(owned);
       setRoots(rootsByConnection[owner!] ?? []);
-      setCatalogOptions(rootsByConnection[owner!] ?? []);
       setSchemaOptions([]);
       setTableNodes([]);
     }

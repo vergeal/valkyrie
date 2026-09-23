@@ -18,7 +18,6 @@ export interface ConnectionSessionsDeps {
   setExpanded: (updater: (previous: Set<string>) => Set<string>) => void;
   setLoadingNodes: (updater: (previous: Set<string>) => Set<string>) => void;
   setActiveNode: (node: SchemaNode | null) => void;
-  setCatalogOptions: (nodes: SchemaNode[]) => void;
   /** 关闭连接后清空工作区相关状态（对象页 / 网格 / 信息面板等，由 App 统一负责） */
   clearUiOnDisconnect: () => void;
   askConfirm: (message: string, title?: string, danger?: boolean) => Promise<boolean>;
@@ -39,7 +38,7 @@ export interface ConnectionSessionsDeps {
 export function useConnectionSessions(deps: ConnectionSessionsDeps) {
   const {
     tabsRef, focusObjectPage, objectTargetRef, setExpanded, setLoadingNodes, setActiveNode,
-    setCatalogOptions, clearUiOnDisconnect, askConfirm, setConnectionDialog, withBusy, setPending, setError, setStatus, flash,
+    clearUiOnDisconnect, askConfirm, setConnectionDialog, withBusy, setPending, setError, setStatus, flash,
     resolveSql
   } = deps;
 
@@ -270,7 +269,6 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
 
     setSession(nextSession);
     setRoots(nextSession && nextName ? rootsByConnection[nextName] ?? [] : []);
-    setCatalogOptions(nextSession && nextName ? rootsByConnection[nextName] ?? [] : []);
     /* 其余工作区状态（对象页 / 网格 / 信息面板 / 日志等）统一清空 */
     clearUiOnDisconnect();
     setStatus(`已关闭连接 ${target}`);
@@ -354,7 +352,6 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
 
     setSession(null);
     setRoots([]);
-    setCatalogOptions([]);
     clearUiOnDisconnect();
     setStatus(`已关闭 ${names.length} 个连接`);
   }
@@ -385,10 +382,8 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
 
       setRootsByConnection(previous => ({ ...previous, [name]: payload.nodes }));
 
-      if (session?.name === name) {
+      if (session?.name === name)
         setRoots(payload.nodes);
-        setCatalogOptions(payload.nodes);
-      }
 
       setStatus(`已刷新 ${name}`);
       flash(`已刷新 ${name}`);
