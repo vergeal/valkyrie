@@ -45,6 +45,8 @@ export function useQueryContext(deps: QueryContextDeps) {
 
   const activeCatalog = activeTab?.kind === "query" ? activeTab.path.catalog : undefined;
   const activeSchema = activeTab?.kind === "query" ? activeTab.path.schema : undefined;
+  /* 控制台挂载的顶层节点：库（MySQL）或是模式（达梦这类没有库层级的） */
+  const activeScope = activeCatalog ?? activeSchema;
 
   /* 当前查询标签所属的连接；非查询页（数据 / 设计 / 对象）按活动连接 */
   const tabConnection = activeTab?.kind === "query" ? connectionOfTab(activeTab) : undefined;
@@ -94,12 +96,12 @@ export function useQueryContext(deps: QueryContextDeps) {
      */
     const catalog = activeCatalog && catalogOptions.some(node => node.label === activeCatalog)
       ? activeCatalog
-      : catalogOptions[0]?.label;
+      : activeCatalog ? catalogOptions[0]?.label : undefined;
 
     return {
       sessionId: sameConnection ? consoleSession?.sessionId : undefined,
       connection: sameConnection ? consoleSession?.name : (tabConnection ?? consoleSession?.name ?? lastSessionRef.current.name),
-      catalog: catalog ?? activeCatalog,
+      catalog,
       schema: activeSchema,
       type: sameConnection ? undefined : suggestionType()
     };
@@ -117,7 +119,7 @@ export function useQueryContext(deps: QueryContextDeps) {
 
     void invoke("sql.warmSuggest", {
       sessionId: consoleSession.sessionId,
-      catalog: warmPath.catalog ?? catalogOptions[0]?.label,
+      catalog: warmPath.catalog ?? (warmPath.schema ? undefined : catalogOptions[0]?.label),
       schema: warmPath.schema
     }).catch(() => undefined);
   }, [consoleSession?.sessionId, activeTab?.id, warmPath?.catalog, warmPath?.schema, catalogOptions]);
@@ -138,9 +140,9 @@ export function useQueryContext(deps: QueryContextDeps) {
         : tab));
   }, [consoleRoots, setTabs, consoleSession?.name]);
 
-  /* 切换数据库：加载模式列表与表列表（按控制台自己的连接与会话） */
+  /* 切换数据库 / 模式：加载模式列表与表列表（按控制台自己的连接与会话） */
   useEffect(() => {
-    if (!consoleSession || !activeCatalog) {
+    if (!consoleSession || !activeScope) {
       setSchemaOptions([]);
       setTableNodes([]);
       return;
@@ -149,7 +151,8 @@ export function useQueryContext(deps: QueryContextDeps) {
     let cancelled = false;
 
     void (async () => {
-      const catalogNode = consoleRoots.find(node => node.label === activeCatalog);
+      /* 达梦这类顶层就是模式：activeCatalog 为空时用 schema 去找同一个顶层节点 */
+      const catalogNode = consoleRoots.find(node => node.label === activeScope);
 
       if (!catalogNode)
         return;
@@ -178,7 +181,7 @@ export function useQueryContext(deps: QueryContextDeps) {
     return () => {
       cancelled = true;
     };
-  }, [consoleSession, activeCatalog, consoleRoots]);
+  }, [consoleSession, activeScope, consoleRoots]);
 
   /* 切换模式：加载该模式下的表 */
   useEffect(() => {

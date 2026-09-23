@@ -38,7 +38,7 @@ function formatTime(value?: number): string {
 function sortValue(script: ScriptFile, key: SortKey): string | number {
   switch (key) {
     case "catalog":
-      return script.catalog.toLowerCase();
+      return script.scope.toLowerCase();
     case "size":
       return script.size;
     case "modified":
@@ -78,7 +78,7 @@ export function ScriptList(props: ScriptListProps) {
     const keyword = filter.trim().toLowerCase();
     const matched = keyword
       ? scripts.filter(script =>
-          script.name.toLowerCase().includes(keyword) || script.catalog.toLowerCase().includes(keyword))
+          script.name.toLowerCase().includes(keyword) || script.scope.toLowerCase().includes(keyword))
       : scripts;
     const factor = sort.direction === "asc" ? 1 : -1;
 
@@ -177,7 +177,7 @@ export function ScriptList(props: ScriptListProps) {
               <td>
                 <span className="script-catalog">
                   <Icon name="database" size={12} />
-                  {script.catalog || "-"}
+                  {script.scope || "-"}
                 </span>
               </td>
               <td className="is-num">{formatByteSize(script.size)}</td>

@@ -29,6 +29,7 @@ import valkyrie.driver.api.node.DBCatalogNode;
 import valkyrie.driver.api.node.DBColumnNode;
 import valkyrie.driver.api.node.DBForeignKeyNode;
 import valkyrie.driver.api.node.DBIndexNode;
+import valkyrie.driver.api.node.DBNodeKind;
 import valkyrie.driver.api.node.DBObjectContainerNode;
 import valkyrie.driver.api.node.DBObjectNode;
 import valkyrie.driver.api.node.DBQueryContainerNode;
@@ -1631,7 +1632,7 @@ public class RpcServer
                 return session.name + "/" + catalogOf(node);
         }
 
-        /** 沿父链找到所属的数据库（或模式）名 */
+        /** 沿父链找到脚本目录所属的「库或模式」名 */
         private String catalogOf(DBNode node)
         {
                 DBNode current = node;
@@ -1649,9 +1650,63 @@ public class RpcServer
                 return "default";
         }
 
+        /**
+         * 节点所属的真实 catalog / schema。
+         * 脚本目录名（scope）用的是「最近的库或模式」，但达梦 / PostgreSQL 的脚本挂在模式上，
+         * 执行时要把模式放进 schema、缺省库放进 catalog，不能把模式名当库名去 setCatalog。
+         */
+        private Session nodeContext(DBNode node)
+        {
+                String catalog = null;
+                String schema = null;
+
+                for (DBNode current = node; current != null && (catalog == null || schema == null); current = current.getParent()) {
+                        if (catalog == null && current instanceof DBCatalogNode c)
+                                catalog = c.getLabel();
+
+                        if (schema == null && current instanceof DBSchemaNode s)
+                                schema = s.getLabel();
+                }
+
+                return Session.of(catalog, schema);
+        }
+
+        /** 脚本目录名（scope）对应的真实 catalog / schema：按驱动层级判断它是库还是模式 */
+        private Session scopeContext(Driver driver, String folder)
+        {
+                if (folder == null || folder.isBlank())
+                        return new Session();
+
+                for (DBNode top : driver.getNodeHierarchy()) {
+                        if (top.getLabel().equals(folder)) {
+                                if (top.getKind() == DBNodeKind.SCHEMA)
+                                        return Session.of(null, folder);
+
+                                if (top.getKind() == DBNodeKind.CATALOG)
+                                        return Session.of(folder, null);
+                        }
+
+                        /* 库下面还隔着模式的（PostgreSQL）：目录名是模式，库名取其父 */
+                        if (top.getKind() == DBNodeKind.CATALOG) {
+                                List<DBNode> children = top.getChildren();
+
+                                if (children != null) {
+                                        for (DBNode child : children) {
+                                                if (child.getKind() == DBNodeKind.SCHEMA && child.getLabel().equals(folder))
+                                                        return Session.of(top.getLabel(), folder);
+                                        }
+                                }
+                        }
+                }
+
+                return new Session();
+        }
+
         private JSONObject queryScriptNodes(OpenConnection session, DBNode node)
         {
                 JSONArray nodes = new JSONArray();
+                Session context = nodeContext(node);
+                String scope = catalogOf(node);
 
                 for (QueryFile file : QueryFileRepository.loadScriptFiles(scriptBasePath(session, node))) {
                         if (!file.isFile())
@@ -1663,8 +1718,10 @@ public class RpcServer
                         json.put("kind", "QUERY");
                         json.put("hasChildren", false);
                         json.put("path", file.getAbsolutePath());
-                        /* 打开脚本要用「连接/数据库/文件名」拼路径，树节点必须带上所属数据库 */
-                        json.put("catalog", catalogOf(node));
+                        /* 打开脚本要用「连接/库或模式/文件名」拼路径（scope），执行则用真实 catalog/schema */
+                        json.put("scope", scope);
+                        json.put("catalog", context.catalog());
+                        json.put("schema", context.schema());
                         json.put("size", file.length());
                         json.put("modified", file.lastModified());
                         nodes.add(json);
@@ -1679,6 +1736,8 @@ public class RpcServer
         {
                 String connection = requiredText(params, "connection");
                 String catalog = params.getString("catalog");
+                String sessionId = params.getString("sessionId");
+                OpenConnection session = sessionId == null ? null : sessions.get(sessionId);
 
                 JSONArray files = new JSONArray();
 
@@ -1687,11 +1746,19 @@ public class RpcServer
                         ? QueryFileRepository.loadConnectionScripts(connection)
                         : QueryFileRepository.loadScriptFiles(connection + "/" + catalog);
 
+                Map<String, Session> contextCache = new LinkedHashMap<>();
+
                 for (QueryFile file : scripts) {
+                        String scope = file.getParentFile() == null ? "" : file.getParentFile().getName();
+                        Session context = contextCache.computeIfAbsent(scope,
+                                key -> session == null ? new Session() : scopeContext(session.driver, key));
+
                         JSONObject json = new JSONObject();
                         json.put("name", file.getName());
                         json.put("path", file.getAbsolutePath());
-                        json.put("catalog", file.getParentFile() == null ? "" : file.getParentFile().getName());
+                        json.put("scope", scope);
+                        json.put("catalog", context.catalog());
+                        json.put("schema", context.schema());
                         json.put("size", file.length());
                         json.put("modified", file.lastModified());
                         files.add(json);

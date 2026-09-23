@@ -141,12 +141,20 @@ export function WorkPaneToolbar(props: {
               <Select
                 id={`path-catalog-${activeTab.id}`}
                 icon="layers"
-                value={activeTab.path.catalog ?? ""}
+                /* 顶层是模式时（达梦）用它显示 / 切换模式 */
+                value={activeTab.path.catalog ?? activeTab.path.schema ?? ""}
                 disabled={catalogOptions.length === 0}
                 options={catalogOptions.length === 0
                   ? [{ value: "", label: "—" }]
                   : catalogOptions.map(node => ({ value: node.label, label: node.label }))}
-                onChange={catalog => onUpdateQueryPath({ catalog, schema: undefined, table: undefined })}
+                onChange={name => {
+                  const node = catalogOptions.find(item => item.label === name);
+
+                  /* 顶层是模式（达梦）时写进 schema，别把模式名当库名 */
+                  onUpdateQueryPath(node?.kind === "SCHEMA"
+                    ? { catalog: undefined, schema: name, table: undefined }
+                    : { catalog: name, schema: undefined, table: undefined });
+                }}
               />
             </span>
 

@@ -34,8 +34,11 @@ export interface TableMeta {
 export interface ScriptFile {
   name: string;
   path: string;
-  /** 所属数据库目录 */
-  catalog: string;
+  /** 脚本目录名（库或模式）；读写 / 重命名 / 删除按它拼路径 */
+  scope: string;
+  /** 执行上下文：真实 catalog / schema（达梦 / PostgreSQL 的模式不能当库名） */
+  catalog?: string;
+  schema?: string;
   /** 所属连接（列表接口逐条补齐，用于按连接打开） */
   connection?: string;
   size: number;
@@ -79,6 +82,8 @@ export interface SchemaNode {
   hasChildren: boolean;
   catalog?: string;
   schema?: string;
+  /** 脚本节点：目录名（库或模式），用于拼读写路径 */
+  scope?: string;
   table?: TableMeta;
   column?: ColumnMeta;
   index?: IndexMeta;

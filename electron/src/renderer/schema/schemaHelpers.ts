@@ -71,22 +71,30 @@ export function schemaRank(name: string): number {
   return /^(pg_|information_schema)/.test(name) ? 2 : 1;
 }
 
-/** 选中节点 → 执行上下文：连接名 + 数据库 + 模式 */
+/**
+ * 选中节点 → 执行上下文：连接名 + 数据库 + 模式。
+ *
+ * 顶层节点若是模式（达梦这类没有库层级），模式名不能当 catalog 用：
+ * 执行时会 setCatalog(模式名) 而找不到表，必须放进 schema。
+ */
 export function selectionContext(
   activeNode: SchemaNode | null,
   catalogOptions: SchemaNode[],
   treeRoot: SchemaNode,
   treeChildren: Record<string, SchemaNode[]>
 ): { connection?: string; catalog?: string; schema?: string } {
-  const fallbackCatalog = catalogOptions[0]?.label;
+  const top = catalogOptions[0];
+  const schemaBased = top?.kind === "SCHEMA";
+  const fallbackCatalog = schemaBased ? undefined : top?.label;
+  const fallbackSchema = schemaBased ? top?.label : undefined;
 
   if (!activeNode)
-    return { catalog: fallbackCatalog };
+    return { catalog: fallbackCatalog, schema: fallbackSchema };
 
   const connection = connectionOfNode(activeNode, treeRoot, treeChildren);
 
   const catalog = activeNode.kind === "CATALOG" ? activeNode.label : activeNode.catalog ?? fallbackCatalog;
-  const schema = activeNode.kind === "SCHEMA" ? activeNode.label : activeNode.schema;
+  const schema = activeNode.kind === "SCHEMA" ? activeNode.label : activeNode.schema ?? fallbackSchema;
 
   return { connection, catalog, schema };
 }

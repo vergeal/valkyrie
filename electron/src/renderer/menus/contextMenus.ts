@@ -62,9 +62,9 @@ export interface MenuContext {
   deleteScript: (node: SchemaNode) => void;
   openScriptList: () => void;
   createScript: (catalogHint?: string) => void;
-  openScriptFile: (file: { name: string; catalog: string; connection?: string }) => void;
-  deleteScriptFiles: (files: { name: string; catalog: string }[]) => void;
-  renameScriptFile: (file: { name: string; catalog: string }) => void;
+  openScriptFile: (file: { name: string; scope: string; connection?: string; catalog?: string; schema?: string }) => void;
+  deleteScriptFiles: (files: { name: string; scope: string }[]) => void;
+  renameScriptFile: (file: { name: string; scope: string }) => void;
   saveActiveScript: (saveAs?: boolean) => void;
   runSelectionOrAll: () => void;
   formatActiveQuery: () => void;
@@ -294,7 +294,7 @@ export function buildScriptMenuEntries(script: ScriptFile, ctx: MenuContext): Me
   return [
     { label: "打开", action: () => void ctx.openScriptFile(script) },
     { separator: true },
-    { label: "新建脚本", action: () => void ctx.createScript(script.catalog) },
+      { label: "新建脚本", action: () => void ctx.createScript(script.scope) },
     { label: "重命名", action: () => void ctx.renameScriptFile(script) },
     { separator: true },
     { label: "复制脚本名", action: () => void ctx.copyText(script.name) },

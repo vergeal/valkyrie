@@ -75,6 +75,19 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
     }
   }
 
+  /** 活动标签是否属于别的连接：连接在后台建好时据此判断该不该抢活动连接 */
+  function busyOnOtherConnection(name: string): boolean {
+    const api = tabsRef.current;
+
+    if (!api)
+      return false;
+
+    const active = api.tabs.find(tab => tab.id === api.activeTabId) ?? null;
+    const owner = connectionOfTab(active);
+
+    return Boolean(owner && owner !== name);
+  }
+
   /**
    * 建立 / 切换连接。
    *
@@ -155,20 +168,31 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
       const next = { sessionId: payload.sessionId, name: connection.name, product: payload.product };
 
       setOpenSessions(previous => ({ ...previous, [connection.name]: next }));
-      setSession(next);
+      setRootsByConnection(previous => ({ ...previous, [connection.name]: payload.nodes }));
       lastSessionRef.current = {
         name: connection.name,
         type: connection.type ?? payload.product.type ?? lastSessionRef.current.type
       };
-      setRootsByConnection(previous => ({ ...previous, [connection.name]: payload.nodes }));
-      setRoots(payload.nodes);
-      setActiveNode(null);
-      setStatus(`已连接 ${connection.name}`);
 
       /* 只展开连接节点本身，数据库/表等子节点保持收起，由用户按需展开 */
       setExpanded(previous => new Set(previous).add(`conn:${connection.name}`));
 
-      /* 刚连上的连接成为活动连接：「对象」页换成它的内容，别留着上一个连接的 */
+      /*
+       * 连接是异步建好的：用户可能已经先点开 A、正在 A 的查询页上干活，B 这时才连好。
+       * 这种情况下 B 只在后台落会话，不能把活动连接 / 对象页 / 选中节点抢过去，
+       * 否则 A 的查询上下文（连接 / 库 / 模式）会被 B 顶掉。
+       */
+      if (busyOnOtherConnection(connection.name)) {
+        setStatus(`已连接 ${connection.name}（后台打开）`);
+        return true;
+      }
+
+      setSession(next);
+      setRoots(payload.nodes);
+      setActiveNode(null);
+      setStatus(`已连接 ${connection.name}`);
+
+      /* `focusPage` 为 false 时不把「对象」页牵过去（「打开所有连接」连着开好几条时用） */
       if (options.focusPage !== false)
         void focusObjectPage(connection.name, { session: next, roots: payload.nodes });
 

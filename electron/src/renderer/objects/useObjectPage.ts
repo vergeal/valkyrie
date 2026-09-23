@@ -276,8 +276,38 @@ export function useObjectPage(deps: UseObjectPageDeps) {
 
   /* ------------------------------ 查询脚本 ------------------------------ */
 
+  /** 脚本目录名（库或模式）对应的执行上下文：按已加载的连接层级判断它是库还是模式 */
+  function folderContext(connection: string, folder: string): { catalog?: string; schema?: string } {
+    if (!folder || folder === "default")
+      return {};
+
+    const roots = rootsByConnection[connection] ?? [];
+
+    for (const node of roots) {
+      if (node.label !== folder)
+        continue;
+
+      if (node.kind === "SCHEMA")
+        return { schema: folder };
+
+      if (node.kind === "CATALOG")
+        return { catalog: folder };
+    }
+
+    /* 库下面还隔着模式的（PostgreSQL）：目录名是模式，库名取其父 */
+    for (const node of roots) {
+      if (node.kind !== "CATALOG")
+        continue;
+
+      if ((treeChildren[node.id] ?? []).some(child => child.kind === "SCHEMA" && child.label === folder))
+        return { catalog: node.label, schema: folder };
+    }
+
+    return {};
+  }
+
   /** 打开脚本文件（对象树里的脚本节点与「脚本」页共用一条路径） */
-  async function openScriptFile(file: { name: string; catalog: string; connection?: string }) {
+  async function openScriptFile(file: { name: string; scope: string; connection?: string; catalog?: string; schema?: string }) {
     /*
      * 脚本属于某个连接，打开时必须用那一条：显式指定连接却没开时直接报错，
      * 绝不能退回活动会话 —— 否则点 A 的脚本会开成 B 的控制台。
@@ -291,7 +321,7 @@ export function useObjectPage(deps: UseObjectPageDeps) {
 
     const connection = owner.name;
     const existing = tabs.find(tab =>
-      tab.kind === "query" && tab.script?.name === file.name && tab.script?.catalog === file.catalog
+      tab.kind === "query" && tab.script?.name === file.name && tab.script?.catalog === file.scope
       && tab.script?.connection === connection);
 
     if (existing) {
@@ -299,10 +329,18 @@ export function useObjectPage(deps: UseObjectPageDeps) {
       return;
     }
 
+    /*
+     * 执行上下文与目录名要分开：目录名可能是个模式（达梦 / PostgreSQL），
+     * 直接塞进 path.catalog 会在执行时 setCatalog(模式名) 而找不到表。
+     */
+    const context = file.catalog != null || file.schema != null
+      ? { catalog: file.catalog ?? undefined, schema: file.schema ?? undefined }
+      : folderContext(connection, file.scope);
+
     try {
       const payload = await invoke<{ content: string }>("queryFiles.read", {
         connection,
-        catalog: file.catalog,
+        catalog: file.scope,
         name: file.name
       });
 
@@ -310,8 +348,8 @@ export function useObjectPage(deps: UseObjectPageDeps) {
       tab.title = file.name;
       tab.sql = payload.content;
       tab.savedSql = payload.content;
-      tab.script = { connection, catalog: file.catalog, name: file.name };
-      tab.path = { connection, catalog: file.catalog };
+      tab.script = { connection, catalog: file.scope, name: file.name };
+      tab.path = { connection, catalog: context.catalog, schema: context.schema };
 
       setTabs(previous => [...previous, tab]);
       setActiveTabId(tab.id);
@@ -322,22 +360,23 @@ export function useObjectPage(deps: UseObjectPageDeps) {
   }
 
   /**
-   * 树节点没归到连接时，按数据库名在已打开连接里找一条（同名优先活动会话那条）。
+   * 树节点没归到连接时，按目录名（库 / 模式）在已打开连接里找一条（同名优先活动会话那条）。
    * 节点 id 作废（树刷新过）会让 connectionOfNode 落空，这里兜底，避免开成别的连接。
    */
-  function connectionByCatalog(catalog?: string): string | undefined {
-    if (!catalog)
+  function connectionByScope(scope?: string): string | undefined {
+    if (!scope)
       return undefined;
 
     const matches = Object.entries(rootsByConnection)
-      .filter(([, nodes]) => nodes.some(item => item.label === catalog))
+      .filter(([, nodes]) => nodes.some(item => item.label === scope))
       .map(([name]) => name);
 
     return matches.find(name => name === sessionRef.current?.name) ?? matches[0];
   }
 
   async function openScript(node: SchemaNode) {
-    const connection = connectionOfNode(node) ?? connectionByCatalog(node.catalog);
+    const scope = node.scope ?? node.catalog ?? node.schema ?? "default";
+    const connection = connectionOfNode(node) ?? connectionByScope(scope);
 
     if (!connection) {
       setError("无法确定脚本所属连接，请先在左侧选择连接后再打开");
@@ -346,17 +385,19 @@ export function useObjectPage(deps: UseObjectPageDeps) {
 
     await openScriptFile({
       name: node.label,
-      catalog: node.catalog ?? "default",
-      connection
+      scope,
+      connection,
+      catalog: node.catalog,
+      schema: node.schema
     });
   }
 
-  /** 当前上下文所属的数据库目录（脚本按「连接/数据库」分目录存放） */
+  /** 当前上下文所属的脚本目录（连接下的库或模式名） */
   function scriptCatalog(): string {
-    if (activeNode?.kind === "CATALOG")
+    if (activeNode?.kind === "CATALOG" || activeNode?.kind === "SCHEMA")
       return activeNode.label;
 
-    return activeNode?.catalog ?? roots[0]?.label ?? "default";
+    return activeNode?.scope ?? activeNode?.schema ?? activeNode?.catalog ?? roots[0]?.label ?? "default";
   }
 
   /** 新建脚本：问到名字后写进当前上下文所在的数据库目录，并直接打开 */
@@ -388,7 +429,7 @@ export function useObjectPage(deps: UseObjectPageDeps) {
       if (listTab?.view === "scripts")
         void refreshScriptList(listTab.id);
 
-      await openScriptFile({ name: fileName, catalog, connection: active.name });
+      await openScriptFile({ name: fileName, scope: catalog, connection: active.name });
       setStatus(`已创建脚本 ${fileName}`);
     } catch (e) {
       setError(messageOf(e));
@@ -396,13 +437,13 @@ export function useObjectPage(deps: UseObjectPageDeps) {
   }
 
   /** 重命名脚本（新名字不带 .sql 时自动补上） */
-  async function renameScriptFile(file: { name: string; catalog: string }) {
+  async function renameScriptFile(file: { name: string; scope: string }) {
     const active = sessionRef.current;
 
     if (!active)
       return;
 
-    const input = await askText(`重命名脚本（${file.catalog}）`, file.name);
+    const input = await askText(`重命名脚本（${file.scope}）`, file.name);
 
     if (!input)
       return;
@@ -415,14 +456,14 @@ export function useObjectPage(deps: UseObjectPageDeps) {
     try {
       await invoke("queryFiles.rename", {
         connection: active.name,
-        catalog: file.catalog,
+        catalog: file.scope,
         oldName: file.name,
         newName: name
       });
 
       /* 已打开的标签同步改名，避免保存时写回旧文件 */
       setTabs(previous => previous.map(tab =>
-        tab.kind === "query" && tab.script?.name === file.name && tab.script?.catalog === file.catalog
+        tab.kind === "query" && tab.script?.name === file.name && tab.script?.catalog === file.scope
           ? { ...tab, title: name, script: { ...tab.script, name } }
           : tab));
 
@@ -440,11 +481,11 @@ export function useObjectPage(deps: UseObjectPageDeps) {
   }
 
   async function renameScript(node: SchemaNode) {
-    await renameScriptFile({ name: node.label, catalog: node.catalog ?? "default" });
+    await renameScriptFile({ name: node.label, scope: node.scope ?? node.catalog ?? node.schema ?? "default" });
   }
 
   /** 删除脚本：支持一次删多个（脚本页多选后删除） */
-  async function deleteScriptFiles(files: { name: string; catalog: string }[]) {
+  async function deleteScriptFiles(files: { name: string; scope: string }[]) {
     const active = sessionRef.current;
 
     if (!active || files.length === 0)
@@ -458,11 +499,11 @@ export function useObjectPage(deps: UseObjectPageDeps) {
 
     try {
       for (const file of files)
-        await invoke("queryFiles.delete", { connection: active.name, catalog: file.catalog, name: file.name });
+        await invoke("queryFiles.delete", { connection: active.name, catalog: file.scope, name: file.name });
 
       /* 关掉这些脚本对应的查询页 */
       const opened = tabs.filter(tab =>
-        tab.kind === "query" && tab.script && files.some(file => file.name === tab.script?.name && file.catalog === tab.script?.catalog));
+        tab.kind === "query" && tab.script && files.some(file => file.name === tab.script?.name && file.scope === tab.script?.catalog));
 
       if (opened.length > 0)
         setTabs(previous => previous.filter(tab => !opened.some(item => item.id === tab.id)));
@@ -482,7 +523,7 @@ export function useObjectPage(deps: UseObjectPageDeps) {
   }
 
   async function deleteScript(node: SchemaNode) {
-    await deleteScriptFiles([{ name: node.label, catalog: node.catalog ?? "default" }]);
+    await deleteScriptFiles([{ name: node.label, scope: node.scope ?? node.catalog ?? node.schema ?? "default" }]);
   }
 
   /* 拉取某个连接下所有数据库目录里的脚本（脚本对象页数据源） */
@@ -490,7 +531,11 @@ export function useObjectPage(deps: UseObjectPageDeps) {
     if (!active)
       return [];
 
-    const payload = await invoke<{ files: ScriptFile[] }>("queryFiles.list", { connection: active.name });
+    /* 带上会话：数据层据此把目录名解析成真实 catalog / schema（模式不能当库） */
+    const payload = await invoke<{ files: ScriptFile[] }>("queryFiles.list", {
+      connection: active.name,
+      sessionId: active.sessionId
+    });
     /* 脚本页是整连接共用的，点开时要按它所属连接读，这里把归属带上 */
     return (payload.files ?? []).map(file => ({ ...file, connection: active.name }));
   }
@@ -619,7 +664,10 @@ export function useObjectPage(deps: UseObjectPageDeps) {
     if (!activeTab || activeTab.kind !== "query")
       return;
 
-    if (!session) {
+    /* 脚本存到控制台自己的连接下，不跟着活动连接跑 */
+    const connection = activeTab.path.connection ?? activeTab.script?.connection ?? session?.name;
+
+    if (!connection) {
       setError("请先连接数据库，再保存脚本");
       return;
     }
@@ -627,9 +675,10 @@ export function useObjectPage(deps: UseObjectPageDeps) {
     const script = activeTab.script;
     /* 内容可能还停在 draft ref（未同步进 tabs 状态），保存时取最新值 */
     const content = resolveSql ? resolveSql(activeTab) : activeTab.sql;
-    const catalog = activeTab.path.catalog ?? scriptCatalog();
-    /* 已有脚本就存回它原本的数据库目录，避免另存为跑到别的库里去 */
-    const target = script?.catalog ?? catalog;
+    /* 目录名是控制台所在的库或模式（模式库要取 schema） */
+    const folder = activeTab.path.schema ?? activeTab.path.catalog ?? scriptCatalog();
+    /* 已有脚本就存回它原本的目录，避免另存为跑到别的库里去 */
+    const target = script?.catalog ?? folder;
 
     try {
       if (!script || saveAs) {
@@ -641,7 +690,7 @@ export function useObjectPage(deps: UseObjectPageDeps) {
         const fileName = name.toLowerCase().endsWith(".sql") ? name : `${name}.sql`;
 
         await invoke("queryFiles.save", {
-          connection: session.name,
+          connection,
           catalog: target,
           name: fileName,
           content
@@ -650,7 +699,7 @@ export function useObjectPage(deps: UseObjectPageDeps) {
         updateTab(activeTab.id, {
           title: fileName,
           savedSql: content,
-          script: { connection: session.name, catalog: target, name: fileName }
+          script: { connection, catalog: target, name: fileName }
         });
 
         await refreshScriptTree();
