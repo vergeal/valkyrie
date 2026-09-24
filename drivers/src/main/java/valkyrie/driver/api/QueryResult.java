@@ -2,17 +2,6 @@ package valkyrie.driver.api;
 
 import lombok.Getter;
 import lombok.Setter;
-import net.sf.jsqlparser.expression.Expression;
-import net.sf.jsqlparser.expression.LongValue;
-import net.sf.jsqlparser.expression.NullValue;
-import net.sf.jsqlparser.expression.StringValue;
-import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
-import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
-import net.sf.jsqlparser.expression.operators.relational.IsNullExpression;
-import net.sf.jsqlparser.schema.Table;
-import net.sf.jsqlparser.statement.delete.Delete;
-import net.sf.jsqlparser.statement.select.Limit;
-import net.sf.jsqlparser.statement.update.Update;
 import valkyrie.driver.api.exception.DriverException;
 import valkyrie.driver.api.sql.SQL;
 import valkyrie.utils.Optional;
@@ -342,144 +331,87 @@ public class QueryResult
 
         private SQL toDeleteSQL(List<Integer> indices)
         {
-                List<Delete> deletes = new ArrayList<>();
-
-                indices.forEach(index -> {
-                        var delete = new Delete();
-                        List<Expression> equals = new ArrayList<>();
-
-                        var table = new Table(driver.getDialect().removeQuote(sql.getSingleTableName()));
-                        delete.setTable(table);
-
-                        List<Column> whereColumns = columns;
-
-                        if (!pks.isEmpty())
-                                whereColumns = pks;
-
-                        whereColumns.forEach(col -> {
-
-                                var w = equalsOrNull(col.getName(), rows.get(index).get(col.getIndex()));
-
-                                equals.add(w);
-
-                        });
-
-                        Expression exp = equals.getFirst();
-
-                        for (int i = 1; i < equals.size(); i++)
-                                exp = new AndExpression(exp, equals.get(i));
-
-                        delete.setWhere(exp);
-
-                        if (pks.isEmpty()) {
-                                Limit limit = new Limit();
-                                limit.setRowCount(new LongValue(1));
-                                delete.setLimit(limit);
-                        }
-
-                        deletes.add(delete);
-                });
+                String table = driver.getDialect().removeQuote(sql.getSingleTableName());
+                List<Column> whereColumns = pks.isEmpty() ? columns : pks;
 
                 StringBuilder builder = new StringBuilder();
 
-                for (Delete delete : deletes)
-                        builder.append(delete.toString()).append(";");
+                for (int index : indices) {
+                        builder.append("DELETE FROM ").append(table).append(" WHERE ");
+                        appendWhere(builder, whereColumns, rows.get(index));
+
+                        if (pks.isEmpty())
+                                builder.append(" LIMIT 1");
+
+                        builder.append(";");
+                }
 
                 return new SQL(builder.toString());
         }
 
         private SQL toUpdateSQL()
         {
-                List<Update> updates = new ArrayList<>();
-
-                for (Map.Entry<Integer, GridRow> entry : updateRowBuffer.entrySet()) {
-
-                        var update = new Update();
-                        var row = entry.getValue();
-
-                        var table = new Table(driver.getDialect().removeQuote(sql.getSingleTableName()));
-                        update.setTable(table);
-
-                        for (int i = 0; i < row.size(); i++) {
-
-                                String v = row.get(i);
-
-                                if (!Objects.equals(v, rows.get(entry.getKey()).get(i))) {
-
-                                        var c = new net.sf.jsqlparser.schema.Column(columns.get(i).getName());
-
-                                        Expression exp;
-
-                                        if (v != null) {
-                                                exp = new StringValue(escape(v));
-                                        } else {
-                                                exp = new NullValue();
-                                        }
-
-                                        update.addUpdateSet(c, exp);
-
-                                }
-
-                        }
-
-                        List<Column> whereColumns = columns;
-
-                        if (!pks.isEmpty())
-                                whereColumns = pks;
-
-                        Expression whereExpression = null;
-
-                        for (Column col : whereColumns) {
-
-                                var r = rows.get(entry.getKey());
-                                var w = equalsOrNull(col.getName(), r.get(col.getIndex()));
-
-                                // 组合 WHERE 条件
-                                if (whereExpression == null) {
-                                        whereExpression = w;
-                                } else {
-                                        whereExpression = new AndExpression(whereExpression, w);
-                                }
-
-                        }
-
-                        if (whereExpression != null)
-                                update.setWhere(whereExpression);
-
-                        /* 如果没有主键只修改一条 */
-                        if (pks.isEmpty()) {
-                                Limit limit = new Limit();
-                                limit.setRowCount(new LongValue(1));
-                                update.setLimit(limit);
-                        }
-
-                        updates.add(update);
-                }
+                String table = driver.getDialect().removeQuote(sql.getSingleTableName());
+                List<Column> whereColumns = pks.isEmpty() ? columns : pks;
 
                 StringBuilder builder = new StringBuilder();
 
-                for (Update update : updates)
-                        builder.append(update.toString()).append(";");
+                for (Map.Entry<Integer, GridRow> entry : updateRowBuffer.entrySet()) {
+                        GridRow row = entry.getValue();
+                        GridRow original = rows.get(entry.getKey());
+                        StringBuilder sets = new StringBuilder();
+
+                        for (int i = 0; i < row.size(); i++) {
+                                String value = row.get(i);
+
+                                if (Objects.equals(value, original.get(i)))
+                                        continue;
+
+                                if (sets.length() > 0)
+                                        sets.append(", ");
+
+                                sets.append(columns.get(i).getName()).append(" = ");
+                                sets.append(value == null ? "NULL" : "'" + escape(value) + "'");
+                        }
+
+                        /* 整行又改回原值：不生成无意义（且语法不合法）的 UPDATE */
+                        if (sets.length() == 0)
+                                continue;
+
+                        builder.append("UPDATE ").append(table).append(" SET ").append(sets).append(" WHERE ");
+                        appendWhere(builder, whereColumns, original);
+
+                        /* 没有主键只能定位到一行 */
+                        if (pks.isEmpty())
+                                builder.append(" LIMIT 1");
+
+                        builder.append(";");
+                }
 
                 return new SQL(builder.toString());
         }
 
         /**
-         * 构造 {@code column = value} 定位条件；原值为 NULL 时使用
-         * {@code column IS NULL}，避免生成恒不匹配的 {@code column = NULL}。
+         * 拼 WHERE：主键为空时按全部原值定位；原值为 NULL 用 {@code IS NULL}，
+         * 避免生成恒不匹配的 {@code column = NULL}。
          */
-        private static Expression equalsOrNull(String columnName, String value)
+        private static void appendWhere(StringBuilder builder, List<Column> whereColumns, GridRow row)
         {
-                var column = new net.sf.jsqlparser.schema.Column(columnName);
+                for (int i = 0; i < whereColumns.size(); i++) {
+                        Column column = whereColumns.get(i);
 
-                if (value == null)
-                        return new IsNullExpression(column);
+                        if (i > 0)
+                                builder.append(" AND ");
 
-                var equals = new EqualsTo();
-                equals.setLeftExpression(column);
-                equals.setRightExpression(new StringValue(escape(value)));
+                        builder.append(column.getName());
 
-                return equals;
+                        String value = row.get(column.getIndex());
+
+                        if (value == null)
+                                builder.append(" IS NULL");
+                        else
+                                builder.append(" = '").append(escape(value)).append("'");
+                }
         }
 
         /**

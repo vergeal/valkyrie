@@ -1,9 +1,6 @@
 package valkyrie.driver.api.sql;
 
 import lombok.Getter;
-import net.sf.jsqlparser.parser.CCJSqlParserUtil;
-import net.sf.jsqlparser.statement.Statement;
-import net.sf.jsqlparser.statement.Statements;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import valkyrie.utils.collection.Lists;
@@ -58,47 +55,15 @@ public class SQL implements Iterable<SQLParsedStatement>
         }
 
         /**
-         * 拆分解析 SQL：
+         * 拆分解析 SQL：按分号把脚本切成独立语句，逐条按首关键字判命令类型。
          * <p>
-         * 优先整体交给 jsqlparser 解析；若整体解析失败（例如脚本中含 MySQL 的
-         * {@code SET @var := ...}、{@code SELECT ... INTO @var}、{@code PREPARE}/{@code DEALLOCATE}
-         * 等 jsqlparser 不支持的方言语句），则按分号将脚本逐条切分后容错解析，
-         * 避免把整段脚本折叠为单条语句而导致命令类型误判、整批执行失败。
+         * 不再依赖第三方解析器；{@code SET @var := ...}、{@code SELECT ... INTO @var}、
+         * {@code PREPARE}/{@code DEALLOCATE} 等方言语句都能按文本照常执行。
          */
         private void parse(SQLCommandType type, String raw)
         {
-                try {
-                        Statements parsed = CCJSqlParserUtil.parseStatements(raw);
-
-                        for (Statement statement : parsed) {
-                                SQLParsedStatement sqlParsedStatement = new SQLParsedStatement(statement);
-                                if (type != null)
-                                        sqlParsedStatement.setCommand(type);
-                                this.statements.add(sqlParsedStatement);
-                        }
-                } catch (Exception e) {
-                        for (String part : splitStatements(raw)) {
-                                this.statements.add(parseOne(type, part));
-                        }
-                }
-        }
-
-        /**
-         * 单条语句容错解析：jsqlparser 可解析则走结构化类型推导；
-         * 解析失败则降级为纯文本，并按首关键字粗判命令类型。
-         */
-        private static SQLParsedStatement parseOne(SQLCommandType type, String part)
-        {
-                try {
-                        Statement statement = CCJSqlParserUtil.parse(part);
-                        SQLParsedStatement sqlParsedStatement = new SQLParsedStatement(statement);
-                        if (type != null)
-                                sqlParsedStatement.setCommand(type);
-                        return sqlParsedStatement;
-                } catch (Exception e) {
-                        SQLCommandType command = type != null ? type : SQLParsedStatement.classify(part);
-                        return new SQLParsedStatement(part, command);
-                }
+                for (String part : splitStatements(raw))
+                        this.statements.add(new SQLParsedStatement(part, type));
         }
 
         /**
@@ -119,21 +84,30 @@ public class SQL implements Iterable<SQLParsedStatement>
                 while (i < n) {
                         char c = raw.charAt(i);
 
-                        /* 行注释 -- / # */
+                        /*
+                         * 注释：跳过时原样留下。注释里可能有分号不能当分隔符，
+                         * 但执行要发原文（优化器提示注释、MySQL 版本注释都有效），
+                         * 不能像以前那样丢掉 —— 那样会把提示注释吃掉，还可能把前后 token 粘一起。
+                         */
                         if (quote == 0 && c == '-' && i + 1 < n && raw.charAt(i + 1) == '-') {
-                                i = skipToLineEnd(raw, i + 2);
+                                int end = skipToLineEnd(raw, i + 2);
+                                part.append(raw, i, end);
+                                i = end;
                                 continue;
                         }
 
                         if (quote == 0 && c == '#') {
-                                i = skipToLineEnd(raw, i + 1);
+                                int end = skipToLineEnd(raw, i + 1);
+                                part.append(raw, i, end);
+                                i = end;
                                 continue;
                         }
 
-                        /* 块注释 */
                         if (quote == 0 && c == '/' && i + 1 < n && raw.charAt(i + 1) == '*') {
                                 int end = raw.indexOf("*/", i + 2);
-                                i = end < 0 ? n : end + 2;
+                                end = end < 0 ? n : end + 2;
+                                part.append(raw, i, end);
+                                i = end;
                                 continue;
                         }
 

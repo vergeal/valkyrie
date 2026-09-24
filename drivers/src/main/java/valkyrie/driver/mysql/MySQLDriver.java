@@ -1,9 +1,5 @@
 package valkyrie.driver.mysql;
 
-import net.sf.jsqlparser.statement.alter.Alter;
-import net.sf.jsqlparser.statement.alter.AlterExpression;
-import net.sf.jsqlparser.statement.alter.AlterOperation;
-import net.sf.jsqlparser.statement.create.table.ColDataType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import valkyrie.driver.api.*;
@@ -535,42 +531,27 @@ public class MySQLDriver extends Driver
                 StringBuilder builder = new StringBuilder();
 
                 for (Column col : columns) {
-                        AlterExpression alterExpr = new AlterExpression();
+                        StringBuilder definition = new StringBuilder();
 
-                        if (col.getOriginalName() != null) {
-                                alterExpr.setOperation(AlterOperation.CHANGE);
-                                alterExpr.setColumnOldName("`" + col.getOriginalName() + "`");
-                        } else {
-                                alterExpr.setOperation(AlterOperation.ADD);
-                        }
-
-                        ColDataType colDataType = new ColDataType(col.getType());
-
-                        var alterColDataType = new AlterExpression.ColumnDataType(false);
-
-                        alterColDataType.setColumnName(dialect.quote(col.getName()));
-                        alterColDataType.setColDataType(colDataType);
-
-                        alterColDataType.addColumnSpecs(
-                                col.isNotNull() ? "NOT NULL" : "NULL"
-                        );
+                        definition.append(dialect.quote(col.getName())).append(' ').append(col.getType());
+                        definition.append(col.isNotNull() ? " NOT NULL" : " NULL");
 
                         if (col.isAutoIncrement())
-                                alterColDataType.addColumnSpecs("AUTO_INCREMENT");
+                                definition.append(" AUTO_INCREMENT");
 
                         if (strnempty(col.getDefaultValue()))
-                                alterColDataType.addColumnSpecs("DEFAULT", col.getDefaultValue());
+                                definition.append(" DEFAULT ").append(col.getDefaultValue());
 
                         if (col.getComment() != null)
-                                alterColDataType.addColumnSpecs("COMMENT", "'" + col.getComment() + "'");
+                                definition.append(" COMMENT '").append(col.getComment()).append("'");
 
-                        alterExpr.addColDataType(alterColDataType);
-
-                        Alter alter = new Alter();
-                        alter.setTable(new net.sf.jsqlparser.schema.Table(dialect.quote(table)));
-                        alter.setAlterExpressions(List.of(alterExpr));
-
-                        builder.append(alter).append(";");
+                        if (col.getOriginalName() != null)
+                                builder.append("ALTER TABLE ").append(dialect.quote(table))
+                                        .append(" CHANGE `").append(col.getOriginalName()).append("` ")
+                                        .append(definition).append(";");
+                        else
+                                builder.append("ALTER TABLE ").append(dialect.quote(table))
+                                        .append(" ADD ").append(definition).append(";");
                 }
 
                 execute(session, new SQL(atos(builder)));

@@ -1,10 +1,6 @@
 package valkyrie.driver.api.exception;
 
-import net.sf.jsqlparser.JSQLParserException;
-import valkyrie.utils.exception.Causes;
 import valkyrie.utils.exception.SystemRuntimeException;
-
-import static valkyrie.utils.string.StrStaticImports.strtok;
 
 /**
  * @author Luo Tiansheng
@@ -14,11 +10,6 @@ public class ParserException extends SystemRuntimeException
 {
         public ParserException()
         {
-        }
-
-        public ParserException(JSQLParserException e)
-        {
-                this(strtok(Causes.message(e), "\n")[0]);
         }
 
         public ParserException(Throwable e)
