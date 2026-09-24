@@ -73,42 +73,7 @@ export function WorkPaneToolbar(props: {
 
       {activeTab?.kind === "query" && (
         <>
-          <button
-            type="button"
-            /* 执行中只置灰，不加转圈 / 闪烁动画（进度看状态栏与日志页） */
-            className="tbtn is-primary"
-            disabled={activeTab.running}
-            title={`执行 (${KEY.run})`}
-            onClick={onRunSelectionOrAll}
-          >
-            <Icon name="play" />执行
-          </button>
-          <button
-            type="button"
-            className="tbtn is-danger"
-            disabled={!activeTab.running}
-            onClick={onStopQuery}
-          >
-            <Icon name="stop" />停止
-          </button>
-          <span className="tbtn-sep" aria-hidden="true" />
-          <button type="button" className="tbtn" onClick={onFormatQuery}>
-            <Icon name="code" />格式化
-          </button>
-          <button
-            type="button"
-            className="tbtn"
-            disabled={!canExplain || activeTab.running}
-            title="执行计划（查询语句）"
-            onClick={onExplainQuery}
-          >
-            <Icon name="zap" />执行计划
-          </button>
-          <span className="toolbar-text">
-            {activeTab.running ? "执行中…" : `${activeTab.sql.split("\n").length} 行`}
-          </span>
-
-          {/* 连接 / 数据库 / 模式 / 表：SQL 执行上下文 */}
+          {/* 连接 / 数据库 / 模式：SQL 执行上下文，放在「执行」前面 */}
           <span className="path-selector">
             <span className="path-item">
               <label htmlFor={`path-conn-${activeTab.id}`}>连接</label>
@@ -172,7 +137,47 @@ export function WorkPaneToolbar(props: {
                 onChange={schema => onUpdateQueryPath({ schema: schema || undefined, table: undefined })}
               />
             </span>
+          </span>
 
+          <span className="tbtn-sep" aria-hidden="true" />
+
+          <button
+            type="button"
+            /* 执行中只置灰，不加转圈 / 闪烁动画（进度看状态栏与日志页） */
+            className="tbtn is-primary"
+            disabled={activeTab.running}
+            title={`执行 (${KEY.run})`}
+            onClick={onRunSelectionOrAll}
+          >
+            <Icon name="play" />执行
+          </button>
+          <button
+            type="button"
+            className="tbtn is-danger"
+            disabled={!activeTab.running}
+            onClick={onStopQuery}
+          >
+            <Icon name="stop" />停止
+          </button>
+          <span className="tbtn-sep" aria-hidden="true" />
+          <button type="button" className="tbtn" onClick={onFormatQuery}>
+            <Icon name="code" />格式化
+          </button>
+          <button
+            type="button"
+            className="tbtn"
+            disabled={!canExplain || activeTab.running}
+            title="执行计划（查询语句）"
+            onClick={onExplainQuery}
+          >
+            <Icon name="zap" />执行计划
+          </button>
+          <span className="toolbar-text">
+            {activeTab.running ? "执行中…" : `${activeTab.sql.split("\n").length} 行`}
+          </span>
+
+          {/* 表：位置保持不变 */}
+          <span className="path-selector">
             <span className="path-item">
               <label htmlFor={`path-table-${activeTab.id}`}>表</label>
               <Select
