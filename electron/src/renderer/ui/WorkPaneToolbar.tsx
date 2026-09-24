@@ -54,6 +54,12 @@ export function WorkPaneToolbar(props: {
     onDeleteScriptFiles, onRefreshScriptList, onCreateTableDraft, onRefreshTableList, onLoadPage, onGridFlash, onLoadDesign
   } = props;
 
+  /*
+   * 「数据库」下拉持有的可能是库（MySQL / PostgreSQL）也可能是模式（达梦顶层就是模式）：
+   * 图标跟着节点类型走，和对象树里的图标保持一致。
+   */
+  const catalogIcon = catalogOptions[0]?.kind === "SCHEMA" ? "folder" : "database";
+
   return (
     <div className={`pane-toolbar${tabsEmpty ? " is-hidden" : ""}`}>
       {/* 当前标签在对象树里有对应节点时，给一个定位入口 */}
@@ -105,7 +111,7 @@ export function WorkPaneToolbar(props: {
               <label htmlFor={`path-catalog-${activeTab.id}`}>数据库</label>
               <Select
                 id={`path-catalog-${activeTab.id}`}
-                icon="layers"
+                icon={catalogIcon}
                 /* 顶层是模式时（达梦）用它显示 / 切换模式 */
                 value={activeTab.path.catalog ?? activeTab.path.schema ?? ""}
                 disabled={catalogOptions.length === 0}
