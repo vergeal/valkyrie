@@ -237,14 +237,13 @@ public class SQLParser
                         /* 引用标识符 "xxx" / `xxx` */
                         if (c == '"' || c == '`') {
                                 int start = i;
-                                char q = c;
                                 i++;
 
                                 while (i < n) {
                                         char d = sql.charAt(i);
 
-                                        if (d == q) {
-                                                if (i + 1 < n && sql.charAt(i + 1) == q) {
+                                        if (d == c) {
+                                                if (i + 1 < n && sql.charAt(i + 1) == c) {
                                                         i += 2;
                                                         continue;
                                                 }
@@ -299,14 +298,88 @@ public class SQLParser
                 return tokens;
         }
 
-        /** 首个单词（关键字），小写 */
-        private static String firstKeyword(List<Token> tokens)
+        /**
+         * 首个关键字（小写），不分配词法单元、跳过注释与字符串：
+         * 用于「先廉价判一下语句类型，再决定要不要真正词法分析」。
+         */
+        public static String firstKeyword(String sql)
         {
-                for (Token token : tokens)
-                        if (token.kind() == Kind.WORD)
-                                return token.text().toLowerCase();
+                if (sql == null)
+                        return null;
+
+                int i = 0;
+                int n = sql.length();
+
+                while (i < n) {
+                        char c = sql.charAt(i);
+
+                        if (Character.isWhitespace(c)) {
+                                i++;
+                                continue;
+                        }
+
+                        if (c == '-' && i + 1 < n && sql.charAt(i + 1) == '-') {
+                                i = skipLine(sql, i + 2);
+                                continue;
+                        }
+
+                        if (c == '#') {
+                                i = skipLine(sql, i + 1);
+                                continue;
+                        }
+
+                        if (c == '/' && i + 1 < n && sql.charAt(i + 1) == '*') {
+                                int end = sql.indexOf("*/", i + 2);
+                                i = end < 0 ? n : end + 2;
+                                continue;
+                        }
+
+                        if (c == '\'' || c == '"' || c == '`') {
+                                i = skipQuoted(sql, i, c);
+                                continue;
+                        }
+
+                        if (Character.isLetter(c)) {
+                                int j = i;
+
+                                while (j < n && Character.isLetter(sql.charAt(j)))
+                                        j++;
+
+                                return sql.substring(i, j).toLowerCase();
+                        }
+
+                        i++;
+                }
 
                 return null;
+        }
+
+        private static int skipQuoted(String sql, int from, char quote)
+        {
+                int i = from + 1;
+                int n = sql.length();
+
+                while (i < n) {
+                        char c = sql.charAt(i);
+
+                        if (c == '\\' && quote != '`' && i + 1 < n) {
+                                i += 2;
+                                continue;
+                        }
+
+                        if (c == quote) {
+                                if (i + 1 < n && sql.charAt(i + 1) == quote) {
+                                        i += 2;
+                                        continue;
+                                }
+
+                                return i + 1;
+                        }
+
+                        i++;
+                }
+
+                return n;
         }
 
         /* ********************************************************************* */
@@ -336,11 +409,13 @@ public class SQLParser
                 if (sql == null || sql.isBlank())
                         return tables;
 
-                List<Token> tokens = tokenize(sql);
-                String first = firstKeyword(tokens);
+                /* 先廉价判首关键字：INSERT / DDL 这些根本不需要表名提取，别白词法分析一遍 */
+                String first = firstKeyword(sql);
 
                 if (first == null || !QUERY_LEADING.contains(first))
                         return tables;
+
+                List<Token> tokens = tokenize(sql);
 
                 int fromIndex = -1;
                 int fromCount = 0;
@@ -501,7 +576,7 @@ public class SQLParser
                         if (definition.size() < 2)
                                 continue;
 
-                        Token nameToken = definition.get(0);
+                        Token nameToken = definition.getFirst();
 
                         if (nameToken.kind() != Kind.WORD && nameToken.kind() != Kind.QUOTED)
                                 continue;
@@ -557,13 +632,13 @@ public class SQLParser
                         if (TYPE_STOP.contains(token.text().toLowerCase()))
                                 break;
 
-                        if (type.length() > 0)
+                        if (!type.isEmpty())
                                 type.append(' ');
 
                         type.append(token.text());
                 }
 
-                return type.length() == 0 ? null : uppercase(type.toString());
+                return type.isEmpty() ? null : uppercase(type.toString());
         }
 
         /** DEFAULT 后面的表达式：直接取原文片段，保留引号 / 函数调用；{@code NULL} 存 null */
@@ -578,26 +653,31 @@ public class SQLParser
                         if (i + 1 >= definition.size())
                                 return;
 
-                        int valueStart = definition.get(i + 1).start();
-                        int valueEnd = definition.get(definition.size() - 1).end();
-
-                        for (int j = i + 1; j < definition.size(); j++) {
-                                Token next = definition.get(j);
-
-                                if (next.depth() != 1 || next.kind() != Kind.WORD)
-                                        continue;
-
-                                if (DEFAULT_STOP.contains(next.text().toLowerCase())) {
-                                        valueEnd = next.start();
-                                        break;
-                                }
-                        }
-
-                        String value = ddl.substring(valueStart, Math.min(valueEnd, ddl.length())).trim();
+                        String value = getString(ddl, definition, i);
 
                         column.setDefaultValue(value.isEmpty() || value.equalsIgnoreCase("null") ? null : value);
                         return;
                 }
+        }
+
+        private static String getString(String ddl, List<Token> definition, int i)
+        {
+                int valueStart = definition.get(i + 1).start();
+                int valueEnd = definition.getLast().end();
+
+                for (int j = i + 1; j < definition.size(); j++) {
+                        Token next = definition.get(j);
+
+                        if (next.depth() != 1 || next.kind() != Kind.WORD)
+                                continue;
+
+                        if (DEFAULT_STOP.contains(next.text().toLowerCase())) {
+                                valueEnd = next.start();
+                                break;
+                        }
+                }
+
+                return ddl.substring(valueStart, Math.min(valueEnd, ddl.length())).trim();
         }
 
         private static String stripQuotes(String text)

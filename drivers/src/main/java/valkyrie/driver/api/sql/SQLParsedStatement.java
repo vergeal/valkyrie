@@ -66,15 +66,14 @@ public class SQLParsedStatement
          */
         static SQLCommandType classify(String sql)
         {
-                /* 先去掉注释：语句前面带块注释或行注释时，也按真正的首关键字判断 */
-                String lower = lowercase(SQLParser.stripComments(sql)).trim();
-                String word = firstWord(lower);
+                /* 首关键字：不分配、跳过注释与字符串（语句前面带注释也按真正的首关键字判断） */
+                String word = SQLParser.firstKeyword(sql);
 
                 if (word == null)
                         return SQLCommandType.EXECUTE;
 
-                /* SELECT ... INTO 用户变量 / OUTFILE / DUMPFILE 不产生结果集 */
-                if (word.equals("select") && strhas(lower, " into "))
+                /* SELECT ... INTO 用户变量 / OUTFILE / DUMPFILE 不产生结果集，只有 select 才需要再扫一遍 */
+                if (word.equals("select") && strhas(lowercase(SQLParser.stripComments(sql)), " into "))
                         return SQLCommandType.EXECUTE;
 
                 if (isQueryLike(word))
@@ -109,23 +108,6 @@ public class SQLParsedStatement
                         || word.equals("upsert")
                         || word.equals("commit")
                         || word.equals("rollback");
-        }
-
-        /** 首个连续字母组成的单词（小写），跳过前导的括号 / 空白等 */
-        private static String firstWord(String lower)
-        {
-                int n = lower.length();
-                int i = 0;
-
-                while (i < n && !Character.isLetter(lower.charAt(i)))
-                        i++;
-
-                int j = i;
-
-                while (j < n && Character.isLetter(lower.charAt(j)))
-                        j++;
-
-                return i < j ? lower.substring(i, j) : null;
         }
 
         @Override
