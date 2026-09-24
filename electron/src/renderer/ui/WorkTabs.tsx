@@ -106,10 +106,10 @@ export function WorkTabs(props: {
                 onClick={() => onSelectTab(tab.id)}
                 title={tab.title}
               >
-                <Icon
-                  name={tabIconName(tab)}
-                  size={13}
-                />
+                {/* 查询执行中：图标换成转圈，执行完恢复 */}
+                {tab.kind === "query" && tab.running
+                  ? <span className="work-tab-spinner" role="status" aria-label="执行中" />
+                  : <Icon name={tabIconName(tab)} size={13} />}
                 <span className="work-tab-title">{tab.title}</span>
                 {/* 脚本有未保存的修改 → 标题后面点一个小圆点 */}
                 {isScriptDirty(tab, resolveSql) && <span className="work-tab-dot" title="有未保存的修改" aria-label="有未保存的修改" />}

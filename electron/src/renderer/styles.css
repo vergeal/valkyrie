@@ -1386,6 +1386,17 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
 
 .work-tab-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* 查询执行中：标签图标换成转圈，执行完恢复原图标 */
+.work-tab-spinner {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+
 .work-tab-close {
   display: grid;
   place-items: center;
