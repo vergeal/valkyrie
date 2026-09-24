@@ -35,7 +35,8 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   } = options;
 
   const jobTabRef = useRef<Map<number, string>>(new Map());
-  const runningJobRef = useRef<Map<string, number>>(new Map());
+  /* tabId → 正在执行的 job：记下发起时那条连接的会话，停止时精确取消，不受活动连接切换影响 */
+  const runningJobRef = useRef<Map<string, { jobId: number; sessionId: string }>>(new Map());
 
   /* 日志上限会用在只注册一次的事件回调里，用 ref 取最新值 */
   const logLimitRef = useRef(logLimit);
@@ -148,7 +149,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     }
 
     jobTabRef.current.set(jobId, tabId);
-    runningJobRef.current.set(tabId, jobId);
+    runningJobRef.current.set(tabId, { jobId, sessionId: target.sessionId });
     setError(null);
     setStatus("执行中…");
     /* 重新执行时丢弃上一份执行计划，避免面板里显示与当前 SQL 不符的旧分析 */
@@ -205,17 +206,13 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   }
 
   async function stopQuery() {
-    const target = resolveSessionOfTab(activeTab);
+    const running = activeTab ? runningJobRef.current.get(activeTab.id) : undefined;
 
-    if (!target || !activeTab || !activeTab.running)
+    if (!running)
       return;
 
-    const jobId = runningJobRef.current.get(activeTab.id);
-
-    if (jobId == null)
-      return;
-
-    await invoke("query.cancel", { sessionId: target.sessionId, jobId }).catch(() => undefined);
+    /* 按发起时那条连接的会话取消：期间切过连接也不影响 */
+    await invoke("query.cancel", { sessionId: running.sessionId, jobId: running.jobId }).catch(() => undefined);
     setStatus("已请求取消");
   }
 

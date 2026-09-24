@@ -69,6 +69,15 @@ public abstract class Driver implements SQLExecutor
         protected final Map<Long, Statement> taskQueue = new ConcurrentHashMap<>();
 
         /**
+         * 取消请求早于语句登记到达的 jobId。
+         * <p>
+         * {@code execute} 要先取连接、建 Statement，才把 jobId 放进 taskQueue；
+         * 用户点得够快时 cancel 会先到，那时 taskQueue 里还没有，若不记下来就会整个落空。
+         * 这里先记着，等 {@code execute} 登记后立刻补一刀；执行结束会清掉。
+         */
+        private final Set<Long> pendingCancel = ConcurrentHashMap.newKeySet();
+
+        /**
          * Hook 接口
          */
         protected final List<SQLExecuteHook> hooks = new ArrayList<>();
@@ -871,6 +880,11 @@ public abstract class Driver implements SQLExecutor
                         try (Statement statement = connection.createStatement()) {
                                 QueryResult queryResult = null;
                                 taskQueue.put(jobId, statement);
+
+                                /* 取消请求可能比这条语句先到：登记后立刻补取消，别让用户白点 */
+                                if (pendingCancel.remove(jobId))
+                                        Captor.call(statement::cancel);
+
                                 SQLParsedStatement lastPS = sql.getLast();
 
                                 for (SQLParsedStatement ps : sql) {
@@ -929,19 +943,25 @@ public abstract class Driver implements SQLExecutor
                 } finally {
                         /* 执行结束（正常返回或异常）都要移除，否则每条查询都会在 taskQueue 里留一个 Statement */
                         taskQueue.remove(jobId);
+                        pendingCancel.remove(jobId);
                 }
         }
 
         @Override
-        @SuppressWarnings("ALL")
         public void cancel(long jobId)
         {
-                if (taskQueue.containsKey(jobId))
-                        Captor.call(() -> {
-                                Statement statement = taskQueue.remove(jobId);
+                Statement statement = taskQueue.remove(jobId);
 
-                                if (statement != null)
-                                        statement.cancel();
-                        });
+                if (statement != null) {
+                        Captor.call(statement::cancel);
+                        return;
+                }
+
+                /*
+                 * 还没登记（execute 正在取连接 / 建 Statement）：先记下来，
+                 * 等它登记后立刻取消。加个上限，避免异常情况下长期堆积。
+                 */
+                if (pendingCancel.size() < 4096)
+                        pendingCancel.add(jobId);
         }
 }
