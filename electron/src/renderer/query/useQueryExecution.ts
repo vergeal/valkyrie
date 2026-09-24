@@ -37,6 +37,8 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   const jobTabRef = useRef<Map<number, string>>(new Map());
   /* tabId → 正在执行的 job：记下发起时那条连接的会话，停止时精确取消，不受活动连接切换影响 */
   const runningJobRef = useRef<Map<string, { jobId: number; sessionId: string }>>(new Map());
+  /* 已被用户请求停止的 jobId：连接被强关后的驱动报错按「已取消」处理，不报成失败 */
+  const stopRequestedRef = useRef<Set<number>>(new Set());
 
   /* 日志上限会用在只注册一次的事件回调里，用 ref 取最新值 */
   const logLimitRef = useRef(logLimit);
@@ -185,20 +187,35 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       if (payload.hasResultSet)
         setResultPane("grid");
     } catch (e) {
-      const message = messageOf(e);
+      /*
+       * 用户主动停止：连接被直接丢弃，驱动抛的是「连接已关闭」之类，
+       * 是预期结果，不该当执行失败报错。
+       */
+      if (stopRequestedRef.current.has(jobId)) {
+        setTabs(previous => previous.map(item => item.id === tabId ? {
+          ...item,
+          running: false,
+          messages: [...item.messages, "已取消"]
+        } : item));
+        setResultPane("log");
+        setStatus("已取消");
+      } else {
+        const message = messageOf(e);
 
-      /* 语句执行失败：写进本控制台的日志 / 消息（不弹窗、不占工作区顶部） */
-      const line = formatErrorLog(message);
+        /* 语句执行失败：写进本控制台的日志 / 消息（不弹窗、不占工作区顶部） */
+        const line = formatErrorLog(message);
 
-      setTabs(previous => previous.map(item => item.id === tabId ? {
-        ...item,
-        running: false,
-        messages: [...item.messages, line],
-        logs: appendLog(item.logs ?? [], errorRecord(message, jobId), logLimitRef.current)
-      } : item));
-      setResultPane("log");
-      setStatus("执行失败");
+        setTabs(previous => previous.map(item => item.id === tabId ? {
+          ...item,
+          running: false,
+          messages: [...item.messages, line],
+          logs: appendLog(item.logs ?? [], errorRecord(message, jobId), logLimitRef.current)
+        } : item));
+        setResultPane("log");
+        setStatus("执行失败");
+      }
     } finally {
+      stopRequestedRef.current.delete(jobId);
       runningJobRef.current.delete(tabId);
       /* 事件可能还在 rAF 缓冲里，稍后再删 jobId→标签 映射，避免最后一批日志 / 消息丢失 */
       window.setTimeout(() => jobTabRef.current.delete(jobId), 1500);
@@ -211,9 +228,11 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     if (!running)
       return;
 
+    /* 先标记再取消：回来时驱动抛的「连接关闭」按取消处理，不报成失败 */
+    stopRequestedRef.current.add(running.jobId);
     /* 按发起时那条连接的会话取消：期间切过连接也不影响 */
     await invoke("query.cancel", { sessionId: running.sessionId, jobId: running.jobId }).catch(() => undefined);
-    setStatus("已请求取消");
+    setStatus("正在取消…");
   }
 
   async function formatActiveQuery() {

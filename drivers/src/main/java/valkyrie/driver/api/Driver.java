@@ -64,9 +64,9 @@ public abstract class Driver implements SQLExecutor
         protected @Getter VkDataSource dataSource;
 
         /**
-         * 执行任务列表
+         * 正在执行的任务：jobId → 语句 + 它用的连接。
          */
-        protected final Map<Long, Statement> taskQueue = new ConcurrentHashMap<>();
+        protected final Map<Long, ExecutingTask> taskQueue = new ConcurrentHashMap<>();
 
         /**
          * 取消请求早于语句登记到达的 jobId。
@@ -76,6 +76,9 @@ public abstract class Driver implements SQLExecutor
          * 这里先记着，等 {@code execute} 登记后立刻补一刀；执行结束会清掉。
          */
         private final Set<Long> pendingCancel = ConcurrentHashMap.newKeySet();
+
+        /** 执行中的语句与连接：取消时先 cancel，再直接 abort 掉连接（假中断，解决驱动不支持 cancel） */
+        protected record ExecutingTask(Statement statement, Connection connection) { }
 
         /**
          * Hook 接口
@@ -879,11 +882,12 @@ public abstract class Driver implements SQLExecutor
                 try (Connection connection = getConnection(session)) {
                         try (Statement statement = connection.createStatement()) {
                                 QueryResult queryResult = null;
-                                taskQueue.put(jobId, statement);
+                                ExecutingTask task = new ExecutingTask(statement, connection);
+                                taskQueue.put(jobId, task);
 
                                 /* 取消请求可能比这条语句先到：登记后立刻补取消，别让用户白点 */
                                 if (pendingCancel.remove(jobId))
-                                        Captor.call(statement::cancel);
+                                        kill(task);
 
                                 SQLParsedStatement lastPS = sql.getLast();
 
@@ -947,13 +951,26 @@ public abstract class Driver implements SQLExecutor
                 }
         }
 
+        /**
+         * 停止一个正在执行的任务：直接把这条连接丢弃（假中断）。
+         * <p>
+         * 有些驱动 {@code Statement.cancel()} 根本不生效，被阻塞的 JDBC 调用
+         * 只有连接被强关才会抛错返回，所以 {@code Connection.abort()} 才是保底的一下；
+         * 这条连接不再复用，连接池会重新补一条。随后再 cancel 一下，让驱动顺手释放资源。
+         */
+        private static void kill(ExecutingTask task)
+        {
+                Captor.call(() -> task.connection().abort(Runnable::run));
+                Captor.call(task.statement()::cancel);
+        }
+
         @Override
         public void cancel(long jobId)
         {
-                Statement statement = taskQueue.remove(jobId);
+                ExecutingTask task = taskQueue.remove(jobId);
 
-                if (statement != null) {
-                        Captor.call(statement::cancel);
+                if (task != null) {
+                        kill(task);
                         return;
                 }
 
