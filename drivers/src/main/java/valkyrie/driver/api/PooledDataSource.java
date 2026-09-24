@@ -32,9 +32,20 @@ public class PooledDataSource
                 hconf.setUsername(conf.getUsername());
                 hconf.setPassword(conf.getPassword());
 
+                /*
+                 * 连接池复用策略：
+                 * - 常驻 1 条空闲连接，避免每次查询都重新握手；并发查询最多扩到 16 条；
+                 * - 连接最多活 30 分钟、空闲 10 分钟回收，2 分钟探活一次 ——
+                 *   防止被数据库端 wait_timeout 悄悄断掉的连接还留在池里被复用到。
+                 */
+                hconf.setPoolName("valkyrie-" + conf.getType().name().toLowerCase() + "-" + Integer.toHexString(String.valueOf(conf.getJdbcUrl()).hashCode()));
                 hconf.setMaximumPoolSize(16);
                 hconf.setMinimumIdle(1);
                 hconf.setConnectionTimeout(30000);
+                hconf.setIdleTimeout(600000);
+                hconf.setMaxLifetime(1800000);
+                hconf.setKeepaliveTime(120000);
+                hconf.setValidationTimeout(5000);
 
                 String driverClass = conf.getType().getDriverClass();
 
