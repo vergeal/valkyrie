@@ -1417,10 +1417,12 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  /* 不再自动右推：两组选择器都从左排，避免中间空出一大段 */
   /* 不换行：放不下时由工具栏整体换行，避免下拉框被拆成两行 */
   flex-wrap: nowrap;
 }
+
+/* 表那组：推到最右 */
+.path-selector.is-right { margin-left: auto; }
 
 .path-item { display: inline-flex; align-items: center; gap: 5px; }
 

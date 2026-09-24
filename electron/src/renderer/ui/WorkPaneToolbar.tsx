@@ -176,8 +176,8 @@ export function WorkPaneToolbar(props: {
             {activeTab.running ? "执行中…" : `${activeTab.sql.split("\n").length} 行`}
           </span>
 
-          {/* 表：位置保持不变 */}
-          <span className="path-selector">
+          {/* 表：位置保持不变（钉在最右） */}
+          <span className="path-selector is-right">
             <span className="path-item">
               <label htmlFor={`path-table-${activeTab.id}`}>表</label>
               <Select
