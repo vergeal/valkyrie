@@ -109,6 +109,53 @@ public class SQLParser
                 return end < 0 ? sql.length() : end + 1;
         }
 
+        /**
+         * 片段里是否有真正要执行的 SQL：用来区分「纯注释片段」与「可执行注释」。
+         * 纯行注释（{@code --} / {@code #}）与普通块注释不算内容；
+         * MySQL 版本注释 {@code /*! ... *}{@code /} 与 Oracle 优化器提示 {@code /*+ ... *}{@code /} 算内容。
+         */
+        public static boolean hasExecutableContent(String sql)
+        {
+                if (sql == null)
+                        return false;
+
+                int i = 0;
+                int n = sql.length();
+
+                while (i < n) {
+                        char c = sql.charAt(i);
+
+                        if (Character.isWhitespace(c)) {
+                                i++;
+                                continue;
+                        }
+
+                        if (c == '-' && i + 1 < n && sql.charAt(i + 1) == '-') {
+                                i = skipLine(sql, i + 2);
+                                continue;
+                        }
+
+                        if (c == '#') {
+                                i = skipLine(sql, i + 1);
+                                continue;
+                        }
+
+                        if (c == '/' && i + 1 < n && sql.charAt(i + 1) == '*') {
+                                if (i + 2 < n && (sql.charAt(i + 2) == '!' || sql.charAt(i + 2) == '+'))
+                                        return true;
+
+                                int end = sql.indexOf("*/", i + 2);
+                                i = end < 0 ? n : end + 2;
+                                continue;
+                        }
+
+                        /* 出现任何其它字符（字母 / 数字 / 引号等）都算有内容 */
+                        return true;
+                }
+
+                return false;
+        }
+
         /* ********************************************************************* */
         /*                              词法分析                                  */
         /* ********************************************************************* */

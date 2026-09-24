@@ -3,6 +3,7 @@ package valkyrie.driver.api.sql;
 import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import valkyrie.driver.utils.SQLParser;
 import valkyrie.utils.collection.Lists;
 
 import java.util.Iterator;
@@ -175,8 +176,11 @@ public class SQL implements Iterable<SQLParsedStatement>
                 String sql = part.toString().trim();
                 part.setLength(0);
 
-                if (!sql.isEmpty())
-                        ret.add(sql);
+                /* 只有注释 / 空白的片段（例如脚本末尾那两行说明）不算一条语句，别发去执行 */
+                if (!SQLParser.hasExecutableContent(sql))
+                        return;
+
+                ret.add(sql);
         }
 
         public SQLParsedStatement getLast()
