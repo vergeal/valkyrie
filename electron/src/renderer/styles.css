@@ -2857,17 +2857,19 @@ table.script-list .table-name { min-width: 200px; max-width: 520px; }
 .icon-play, .icon-plus, .icon-check, .icon-save, .icon-plug, .icon-shield, .icon-ok { color: var(--icon-green); }
 /* 中断与危险：停止 / 删除 / 警告 */
 .icon-stop, .icon-trash, .icon-alert, .icon-fail { color: var(--icon-red); }
-/* 数据与导航：刷新 / 复制 / 库 / 服务器 / 编辑 / 信息 */
-.icon-refresh, .icon-copy, .icon-database, .icon-host, .icon-server,
+/* 数据与导航：刷新 / 复制 / 服务器 / 编辑 / 信息 */
+.icon-refresh, .icon-copy, .icon-host, .icon-server,
 .icon-pencil, .icon-info, .icon-latest { color: var(--icon-blue); }
 /* 查找与终端 */
 .icon-search, .icon-terminal { color: var(--icon-sky); }
 /* 结构与显示选项 */
 .icon-wrap, .icon-columns, .icon-system { color: var(--icon-cyan); }
+/* 库 / 模式 / 容器：对象树与工具栏选择器统一用紫色 */
+.icon-database, .icon-folder, .icon-folderOpen { color: var(--icon-violet); }
 /* 代码 / 主题 / 用户 */
 .icon-code, .icon-layers, .icon-download, .icon-moon, .icon-sliders, .icon-user { color: var(--icon-violet); }
-/* 目录 / 键 / 锁 / 浅色主题 */
-.icon-folder, .icon-folderOpen, .icon-key, .icon-lock, .icon-sun, .icon-zap { color: var(--icon-amber); }
+/* 键 / 锁 / 浅色主题 */
+.icon-key, .icon-lock, .icon-sun, .icon-zap { color: var(--icon-amber); }
 .icon-eraser { color: var(--icon-orange); }
 .icon-list, .icon-file { color: var(--icon-teal); }
 /* 关闭、密码可见性这类保持中性，避免整屏都在闪 */
