@@ -3,7 +3,6 @@ package valkyrie.server;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
-import com.github.vertical_blank.sqlformatter.SqlFormatter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import valkyrie.core.model.DiskSavedConnection;
@@ -175,7 +174,6 @@ public class RpcServer
                         case "table.design" -> designTable(params);
                         case "table.export" -> exportTableSql(params);
                         case "database.export" -> exportDatabaseSql(params);
-                        case "sql.format" -> formatSql(params);
                         case "sql.suggest" -> suggestSql(params);
                         case "sql.warmSuggest" -> warmSuggest(params);
                         case "result.update" -> updateCell(params);
@@ -1045,16 +1043,6 @@ public class RpcServer
                 }
 
                 return indexes;
-        }
-
-        private Object formatSql(JSONObject params)
-        {
-                String sql = params.getString("sql");
-
-                JSONObject ret = new JSONObject();
-                ret.put("sql", sql == null || sql.isBlank() ? sql : SqlFormatter.format(sql));
-
-                return ret;
         }
 
         /**

@@ -24,7 +24,8 @@
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-resizable-panels": "^4.12.4",
-    "sonner": "^2.0.8"
+    "sonner": "^2.0.8",
+    "sql-formatter": "^15.9.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.14",

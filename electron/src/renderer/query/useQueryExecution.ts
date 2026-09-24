@@ -6,6 +6,7 @@ import type { ResultPane } from "../app/appTypes";
 import { formatErrorLog, formatProgress } from "../app/format";
 import { appendLog, appendLogs, errorRecord, progressRecord, type LogRecord } from "../ui/LogConsole";
 import { explainStatement, isQuerySql } from "./sqlText";
+import { formatSql } from "./sqlFormat";
 
 interface UseQueryExecutionOptions {
   tabs: WorkTab[];
@@ -223,9 +224,11 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       return;
 
     const source = resolveSql ? resolveSql(activeTab) : activeTab.sql;
+    /* 按这个控制台所属连接的方言格式化；连接已关就退化成通用 SQL */
+    const dbType = resolveSessionOfTab(activeTab)?.product.type;
 
     try {
-      const payload = await invoke<{ sql: string }>("sql.format", { sql: source });
+      const formatted = formatSql(source, dbType);
       const editor = editorRef.current;
       const model = editor?.getModel();
 
@@ -237,14 +240,14 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         editor.pushUndoStop();
         editor.executeEdits("valkyrie.format", [{
           range: model.getFullModelRange(),
-          text: payload.sql,
+          text: formatted,
           forceMoveMarkers: true
         }]);
         editor.pushUndoStop();
         return;
       }
 
-      updateTab(activeTab.id, { sql: payload.sql });
+      updateTab(activeTab.id, { sql: formatted });
     } catch (e) {
       /* 格式化不是语句执行，走系统提示 */
       setError(messageOf(e));
