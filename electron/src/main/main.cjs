@@ -309,6 +309,98 @@ function registerIpc() {
     }
   });
 
+  /*
+   * 自动化工作流：存到 userData/workflows/<name>.json。
+   * 工作流节点自己控制连接的开关，所以读写不依赖数据层是否已打开连接。
+   */
+  const workflowDir = () => path.join(app.getPath("userData"), "workflows");
+  const workflowFile = name => path.join(workflowDir(), `${name}.json`);
+  /* 名称直接拼文件名，先剥掉路径分隔符等非法字符，避免写到目录外 */
+  const sanitizeWorkflowName = value =>
+    String(value ?? "").trim().replace(/[\\/:*?"<>|]/g, "").replace(/\.\./g, "").slice(0, 120);
+
+  ipcMain.handle("valkyrie:workflow-list", async () => {
+    try {
+      const dir = workflowDir();
+
+      if (!fs.existsSync(dir))
+        return [];
+
+      return fs.readdirSync(dir)
+        .filter(file => file.toLowerCase().endsWith(".json"))
+        .map(file => {
+          const stat = fs.statSync(path.join(dir, file));
+          return { name: file.slice(0, -5), modified: stat.mtimeMs, size: stat.size };
+        })
+        .sort((a, b) => b.modified - a.modified);
+    } catch (error) {
+      process.stderr.write(`[valkyrie] 工作流列表读取失败: ${error && error.message}\n`);
+      return [];
+    }
+  });
+
+  ipcMain.handle("valkyrie:workflow-load", async (_event, name) => {
+    try {
+      const target = workflowFile(sanitizeWorkflowName(name));
+      const graph = JSON.parse(fs.readFileSync(target, "utf8"));
+      const stat = fs.statSync(target);
+
+      return { name: sanitizeWorkflowName(name), modified: stat.mtimeMs, size: stat.size, graph };
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle("valkyrie:workflow-save", async (_event, payload) => {
+    const name = sanitizeWorkflowName(payload && payload.name);
+
+    if (!name)
+      return { ok: false, error: "工作流名称不能为空" };
+
+    try {
+      const dir = workflowDir();
+
+      fs.mkdirSync(dir, { recursive: true });
+
+      const target = workflowFile(name);
+
+      /* 先写临时文件再改名，避免写一半被打断留下坏文件 */
+      fs.writeFileSync(`${target}.tmp`, JSON.stringify(payload.graph ?? {}, null, 2), "utf8");
+      fs.renameSync(`${target}.tmp`, target);
+      return { ok: true, name };
+    } catch (error) {
+      process.stderr.write(`[valkyrie] 工作流保存失败: ${error && error.message}\n`);
+      return { ok: false, error: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle("valkyrie:workflow-delete", async (_event, name) => {
+    try {
+      fs.rmSync(workflowFile(sanitizeWorkflowName(name)), { force: true });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.handle("valkyrie:workflow-rename", async (_event, payload) => {
+    const from = sanitizeWorkflowName(payload && payload.from);
+    const to = sanitizeWorkflowName(payload && payload.to);
+
+    if (!from || !to)
+      return { ok: false, error: "工作流名称不能为空" };
+
+    try {
+      const dir = workflowDir();
+
+      fs.mkdirSync(dir, { recursive: true });
+      fs.renameSync(workflowFile(from), workflowFile(to));
+      return { ok: true, name: to };
+    } catch (error) {
+      return { ok: false, error: error && error.message ? error.message : String(error) };
+    }
+  });
+
   ipcMain.handle("valkyrie:invoke", async (_event, method, params) => {
     try {
       /*

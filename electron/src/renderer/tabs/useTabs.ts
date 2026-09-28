@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SavedConnection } from "../api";
 import type { QueryTab, ResultPane, SessionState, WorkTab } from "../app/appTypes";
-import { computeCloseTabs, describeUnsaved, hasUnsaved, newQueryTab, type SqlResolver } from "./tabHelpers";
+import { computeCloseTabs, describeUnsaved, hasUnsaved, newQueryTab, newAutomationTab, type SqlResolver } from "./tabHelpers";
 
 interface UseTabsOptions {
   connections: SavedConnection[];
@@ -43,6 +43,16 @@ export function useTabs(options: UseTabsOptions) {
 
   function createQueryTab() {
     void openQueryTab();
+  }
+
+  /** 新建自动化工作流标签：不依赖任何已打开的连接 */
+  function createAutomationTab() {
+    const tab = newAutomationTab();
+
+    setTabs(previous => [...previous, tab]);
+    setActiveTabId(tab.id);
+
+    return tab;
   }
 
   /**
@@ -138,6 +148,6 @@ export function useTabs(options: UseTabsOptions) {
   return {
     tabs, setTabs, activeTabId, setActiveTabId, activeTab,
     tabDrag, setTabDrag, tabsOverflow, tabsRef,
-    updateTab, createQueryTab, openQueryTab, closeTabs, closeTab, updateQueryPath
+    updateTab, createQueryTab, openQueryTab, closeTabs, closeTab, updateQueryPath, createAutomationTab
   };
 }

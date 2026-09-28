@@ -15,6 +15,7 @@ export function WorkTabs(props: {
   onMoveTab: (from: string, to: string, after: boolean) => void;
   onTabContextMenu: (id: string) => void;
   onCreateQuery: () => void;
+  onCreateWorkflow: () => void;
   onRefreshConnections: () => void;
   onShowAllTabs: () => void;
   /** 取标签的最新编辑器内容（内容可能还没同步进 tabs 状态） */
@@ -22,7 +23,7 @@ export function WorkTabs(props: {
 }) {
   const {
     tabs, activeTabId, tabDrag, tabsOverflow, tabsRef, setTabDrag,
-    onSelectTab, onCloseTab, onMoveTab, onTabContextMenu, onCreateQuery, onRefreshConnections, onShowAllTabs,
+    onSelectTab, onCloseTab, onMoveTab, onTabContextMenu, onCreateQuery, onCreateWorkflow, onRefreshConnections, onShowAllTabs,
     resolveSql
   } = props;
 
@@ -154,6 +155,9 @@ export function WorkTabs(props: {
           <div className="welcome-actions">
             <button type="button" className="tbtn is-primary" onClick={onCreateQuery}>
               <Icon name="terminal" />新建查询
+            </button>
+            <button type="button" className="tbtn" onClick={onCreateWorkflow}>
+              <Icon name="workflow" />新建自动化
             </button>
             <button type="button" className="tbtn" onClick={onRefreshConnections}>
               <Icon name="refresh" />刷新连接

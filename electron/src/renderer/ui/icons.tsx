@@ -48,6 +48,7 @@ import {
   Trash2,
   TriangleAlert,
   User,
+  Workflow,
   X,
   Zap
 } from "lucide-react";
@@ -128,6 +129,7 @@ const ICONS: Record<string, ComponentType<{ size?: number; className?: string; s
   eye: Eye,
   eyeOff: EyeOff,
   zap: Zap,
+  workflow: Workflow,
   file: FileText,
   save: Save,
   pencil: Pencil,
@@ -188,6 +190,7 @@ export const ICON_COLORS: Record<string, string> = {
   calendarClock: "#2563eb",
   clock: "#2563eb",
   eye: "#0891b2",
+  workflow: "#0891b2",
   zap: "#d97706"
 };
 

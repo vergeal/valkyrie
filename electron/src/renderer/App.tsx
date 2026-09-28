@@ -17,6 +17,7 @@ import { useQueryExecution } from "./query/useQueryExecution";
 import { isQuerySql } from "./query/sqlText";
 import { useEditorShortcutRefs, useQueryShortcuts } from "./query/useQueryShortcuts";
 import { useMonacoEditor } from "./editor/useMonacoEditor";
+import { AutomationEditor } from "./automation/ui/AutomationEditor";
 import { useTabs } from "./tabs/useTabs";
 import { useConnectionSessions, type ConnectionTabsApi } from "./connection/useConnectionSessions";
 import { useSchemaTree } from "./schema/useSchemaTree";
@@ -167,7 +168,7 @@ export function App() {
   const {
     tabs, setTabs, activeTabId, setActiveTabId, activeTab,
     tabDrag, setTabDrag, tabsOverflow, tabsRef,
-    updateTab, createQueryTab, openQueryTab, closeTabs, closeTab, updateQueryPath
+    updateTab, createQueryTab, openQueryTab, closeTabs, closeTab, updateQueryPath, createAutomationTab
   } = tabsApi;
 
   /* 关闭窗口 / 退出前：先确认有没有未保存的标签页 */
@@ -516,6 +517,10 @@ export function App() {
     if (activeTab.kind === "objects")
       return [];
 
+    /* 自动化工作流是画布，没有结果集 */
+    if (activeTab.kind === "workflow")
+      return [];
+
     return activeTab.result?.columns ?? [];
   }, [activeTab]);
 
@@ -577,6 +582,8 @@ export function App() {
 
   /* 对象列是整页列表：结果集那一套面板（消息 / 执行计划 / 日志）在这里不出现 */
   const pageTab = activeTab?.kind === "objects";
+  /* 自动化 tab 自带「节点属性 + 运行记录」侧栏，全局对象信息面板对它没有意义，直接收起 */
+  const isAutomation = activeTab?.kind === "workflow";
 
 
 
@@ -596,7 +603,8 @@ export function App() {
     openScript, renameScript, deleteScript, openScriptList, createScript, openScriptFile,
     deleteScriptFiles, renameScriptFile, saveActiveScript,
     runSelectionOrAll, formatActiveQuery, stopQuery, explainActiveQuery, selectAllInPage,
-    copyText, revealPath, closeTabs, revealTreeNode
+    copyText, revealPath, closeTabs, revealTreeNode,
+    createAutomationTab
   };
   const menus = buildAppMenus(menuContext);
   useAppMenu(menus);
@@ -642,6 +650,7 @@ export function App() {
         themeIcon={THEME_ICON[theme]}
         onNewConnection={() => void popupNativeMenu(newConnectionMenuEntries(menuContext))}
         onNewQuery={createQueryTab}
+        onNewWorkflow={createAutomationTab}
         onOpenTableList={() => session && void openTableList(activeNode ?? roots[0])}
         onOpenScriptList={() => void openScriptList()}
         onCycleTheme={() => setTheme(NEXT_THEME[theme])}
@@ -652,7 +661,7 @@ export function App() {
         id="valkyrie-columns"
         defaultLayout={columnsLayout.defaultLayout}
         onLayoutChanged={columnsLayout.onLayoutChanged}
-        className={`work-body${showSide ? "" : " no-side"}${showInfo ? "" : " no-info"}`}
+        className={`work-body${showSide ? "" : " no-side"}${showInfo && !isAutomation ? "" : " no-info"}`}
       >
         <Panel id="side" className="side-panel" defaultSize="23%" minSize="13%" maxSize="36%">
           <SidePanel
@@ -702,6 +711,7 @@ export function App() {
             onMoveTab={(from, to, after) => setTabs(previous => moveTabInList(previous, from, to, after))}
             onTabContextMenu={id => void popupNativeMenu(buildTabMenuEntries(id, menuContext))}
             onCreateQuery={createQueryTab}
+            onCreateWorkflow={createAutomationTab}
             onRefreshConnections={() => void refreshConnections()}
             resolveSql={resolveSql}
             onShowAllTabs={() => void popupNativeMenu(tabs.map(tab => ({
@@ -752,7 +762,8 @@ export function App() {
             onLoadDesign={(tabId, node) => void loadDesign(tabId, node)}
           />
 
-          {/* 编辑器常驻挂载（隐藏时不销毁 Monaco 实例） */}
+          {/* 编辑器常驻挂载（隐藏时不销毁 Monaco 实例）；自动化工作流时整块让位给画布 */}
+          <div className={`work-view${activeTab?.kind === "workflow" ? " is-hidden" : ""}`}>
           <Group
             orientation="vertical"
             id="valkyrie-rows"
@@ -845,6 +856,18 @@ export function App() {
               />
             </Panel>
           </Group>
+          </div>
+
+          {activeTab?.kind === "workflow" && (
+            <AutomationEditor
+              key={activeTab.id}
+              tab={activeTab}
+              connections={connections}
+              onChange={patch => updateTab(activeTab.id, patch)}
+              onStatus={setStatus}
+              onError={setError}
+            />
+          )}
         </main>
         </Panel>
 

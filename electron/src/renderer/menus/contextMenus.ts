@@ -39,6 +39,7 @@ export interface MenuContext {
   setOptionsOpen: (open: boolean) => void;
   setMessageBox: (state: MessageBoxState | null) => void;
   createQueryTab: () => void;
+  createAutomationTab: () => void;
   openAllConnections: () => void;
   closeAllConnections: () => void;
   refreshConnections: () => void;
@@ -102,6 +103,7 @@ export function buildContextMenu(node: SchemaNode, ctx: MenuContext): MenuEntry[
     return [
       { label: "新建连接", icon: "plus", children: newConnectionMenuEntries(ctx) },
       { label: "新建查询", action: ctx.createQueryTab },
+      { label: "新建自动化工作流", icon: "workflow", action: ctx.createAutomationTab },
       { separator: true },
       {
         label: "打开所有连接",
@@ -405,6 +407,7 @@ export function buildAppMenus(ctx: MenuContext): { label: string; items: MenuEnt
         { separator: true },
         { label: "新建脚本…", disabled: !ctx.session, action: () => void ctx.createScript() },
         { label: "脚本列表", disabled: !ctx.session, action: () => void ctx.openScriptList() },
+        { label: "新建自动化工作流", icon: "workflow", action: ctx.createAutomationTab },
         { separator: true },
         { label: "保存脚本", accelerator: ACCEL.save, disabled: ctx.activeTab?.kind !== "query", action: () => void ctx.saveActiveScript() },
         { label: "脚本另存为…", accelerator: ACCEL.saveAs, disabled: ctx.activeTab?.kind !== "query", action: () => void ctx.saveActiveScript(true) },

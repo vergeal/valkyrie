@@ -1,6 +1,16 @@
 import type { SchemaNode } from "../api";
-import type { ObjectTab, QueryTab, WorkTab } from "../app/appTypes";
+import type { ObjectTab, QueryTab, WorkTab, AutomationTab } from "../app/appTypes";
 import { DEFAULT_SQL } from "../app/appConstants";
+import { graphSignature, nextNodeId } from "../automation/core";
+import type { WorkflowGraph } from "../automation/sdk";
+
+function defaultAutomationGraph(): WorkflowGraph {
+  return {
+    version: 1,
+    nodes: [{ id: nextNodeId(), type: "manual-start", position: { x: 120, y: 160 }, config: {} }],
+    edges: []
+  };
+}
 
 let tabSequence = 1;
 
@@ -24,10 +34,32 @@ export function newQueryTab(): QueryTab {
   };
 }
 
+export function newAutomationTab(): AutomationTab {
+  const graph = defaultAutomationGraph();
+
+  return {
+    id: nextTabId(),
+    kind: "workflow" as const,
+    title: `自动化 ${tabSequence - 1}`,
+    running: false,
+    messages: [],
+    graph,
+    savedSignature: graphSignature(graph)
+  };
+}
+
+/** 自动化画布相对上次保存有没有改动 */
+export function isAutomationDirty(tab: WorkTab): boolean {
+  return tab.kind === "workflow" && tab.savedSignature != null && tab.savedSignature !== graphSignature(tab.graph);
+}
+
 /** 工作标签的图标名（标签栏与溢出折叠菜单共用） */
 export function tabIconName(tab: WorkTab): string {
   if (tab.kind === "query")
     return "terminal";
+
+  if (tab.kind === "workflow")
+    return "workflow";
 
   if (tab.kind === "data")
     return "table";
@@ -196,14 +228,17 @@ export function isScriptDirty(tab: WorkTab, sqlOf?: SqlResolver): boolean {
   return tab.kind === "query" && Boolean(tab.script) && tab.savedSql != null && tab.savedSql !== sqlOfTab(tab, sqlOf);
 }
 
-/** 这个标签关掉会丢东西吗：脚本没存盘 or 结果集里有未提交的修改 */
+/** 这个标签关掉会丢东西吗：脚本没存盘 or 结果集里有未提交的修改 or 工作流没保存 */
 export function hasUnsaved(tab: WorkTab, sqlOf?: SqlResolver): boolean {
-  return isScriptDirty(tab, sqlOf) || (tab.pending ?? 0) > 0;
+  return isScriptDirty(tab, sqlOf) || isAutomationDirty(tab) || (tab.pending ?? 0) > 0;
 }
 
 export function describeUnsaved(tab: WorkTab, sqlOf?: SqlResolver): string {
   if (isScriptDirty(tab, sqlOf))
     return `· ${tab.title}（脚本未保存）`;
+
+  if (isAutomationDirty(tab))
+    return `· ${tab.title}（工作流未保存）`;
 
   return `· ${tab.title}（${tab.pending ?? 0} 条未提交修改）`;
 }
@@ -223,6 +258,8 @@ export function tabKindLabel(kind: WorkTab["kind"] | undefined): string {
       return "表结构";
     case "objects":
       return "对象列表";
+    case "workflow":
+      return "自动化";
     default:
       return "就绪";
   }

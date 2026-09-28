@@ -3,6 +3,8 @@
  * 所有数据库操作都通过 Electron 主进程转发给 Java 数据层，渲染层不直接访问数据库。
  */
 
+import type { WorkflowFile, WorkflowFileMeta, WorkflowGraph } from "./automation/sdk";
+
 export interface SavedConnection {
   name: string;
   type: string;
@@ -235,6 +237,12 @@ declare global {
       /** 客户端设置：主进程负责写 userData/settings.json */
       loadSettings?: () => Promise<Record<string, unknown>>;
       saveSettings?: (settings: Record<string, unknown>) => Promise<boolean>;
+      /** 自动化工作流：主进程读写 userData/workflows/<name>.json */
+      listWorkflows?: () => Promise<WorkflowFileMeta[]>;
+      loadWorkflow?: (name: string) => Promise<WorkflowFile | null>;
+      saveWorkflow?: (payload: { name: string; graph: WorkflowGraph }) => Promise<{ ok: boolean; name?: string; error?: string }>;
+      deleteWorkflow?: (name: string) => Promise<boolean>;
+      renameWorkflow?: (payload: { from: string; to: string }) => Promise<{ ok: boolean; name?: string; error?: string }>;
       /** 本机字体族列表 */
       listFonts?: () => Promise<string[]>;
     };
@@ -345,6 +353,29 @@ export function saveSettingsFile(settings: Record<string, unknown>): Promise<boo
 /** 枚举本机字体族（由主进程用各平台系统接口拿，Chromium 未暴露 Local Font Access） */
 export function listFonts(): Promise<string[]> {
   return window.valkyrie?.listFonts?.() ?? Promise.resolve([]);
+}
+
+/** 已存工作流列表（userData/workflows 下的 .json） */
+export function listWorkflows(): Promise<WorkflowFileMeta[]> {
+  return window.valkyrie?.listWorkflows?.() ?? Promise.resolve([]);
+}
+
+/** 读取一份工作流；不存在或解析失败返回 null */
+export function loadWorkflow(name: string): Promise<WorkflowFile | null> {
+  return window.valkyrie?.loadWorkflow?.(name) ?? Promise.resolve(null);
+}
+
+/** 保存工作流；同名覆盖 */
+export function saveWorkflow(name: string, graph: WorkflowGraph): Promise<{ ok: boolean; name?: string; error?: string }> {
+  return window.valkyrie?.saveWorkflow?.({ name, graph }) ?? Promise.resolve({ ok: false, error: "未检测到数据层通道" });
+}
+
+export function deleteWorkflow(name: string): Promise<boolean> {
+  return window.valkyrie?.deleteWorkflow?.(name) ?? Promise.resolve(false);
+}
+
+export function renameWorkflow(from: string, to: string): Promise<{ ok: boolean; name?: string; error?: string }> {
+  return window.valkyrie?.renameWorkflow?.({ from, to }) ?? Promise.resolve({ ok: false, error: "未检测到数据层通道" });
 }
 
 export function messageOf(error: unknown): string {

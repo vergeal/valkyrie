@@ -1,4 +1,5 @@
 import type { ProductMeta, QueryResultPayload, SavedConnection, SchemaNode, ScriptFile, TableColumn, TableIndex } from "../api";
+import type { WorkflowGraph } from "../automation/sdk";
 import type { LogRecord } from "../ui/LogConsole";
 
 /** 已打开连接的活动会话 */
@@ -37,6 +38,16 @@ export interface QueryTab extends BaseTab {
   script?: { connection: string; catalog: string; name: string };
   /* 执行上下文：连接 → 数据库 → 模式 → 表 */
   path: { connection?: string; catalog?: string; schema?: string; table?: string };
+}
+
+/** 自动化工作流编辑页：画布内容与保存状态 */
+export interface AutomationTab extends BaseTab {
+  kind: "workflow";
+  /** 已保存的工作流名称（userData/workflows 下），未落盘时为空 */
+  file?: string;
+  /** 上次保存 / 加载时的图签名，用来判断有没有未保存修改 */
+  savedSignature?: string;
+  graph: WorkflowGraph;
 }
 
 export interface DataTab extends BaseTab {
@@ -89,7 +100,7 @@ export interface ObjectTabScripts extends BaseTab {
 
 export type ObjectTab = ObjectTabTables | ObjectTabScripts;
 
-export type WorkTab = QueryTab | DataTab | DesignTab | ObjectTab;
+export type WorkTab = QueryTab | DataTab | DesignTab | ObjectTab | AutomationTab;
 
 export type ResultPane = "grid" | "msg" | "plan" | "log";
 

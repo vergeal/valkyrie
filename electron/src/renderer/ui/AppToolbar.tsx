@@ -8,13 +8,14 @@ export function AppToolbar(props: {
   themeIcon: string;
   onNewConnection: () => void;
   onNewQuery: () => void;
+  onNewWorkflow: () => void;
   onOpenTableList: () => void;
   onOpenScriptList: () => void;
   onCycleTheme: () => void;
 }) {
   const {
     canOpenTableList, pageSize, themeLabel, themeIcon,
-    onNewConnection, onNewQuery, onOpenTableList, onOpenScriptList, onCycleTheme
+    onNewConnection, onNewQuery, onNewWorkflow, onOpenTableList, onOpenScriptList, onCycleTheme
   } = props;
 
   return (
@@ -30,6 +31,9 @@ export function AppToolbar(props: {
       </button>
       <button type="button" className="tbtn" onClick={onNewQuery}>
         <Icon name="terminal" />新建查询
+      </button>
+      <button type="button" className="tbtn" title="新建自动化工作流" onClick={onNewWorkflow}>
+        <Icon name="workflow" />自动化
       </button>
       <button
         type="button"

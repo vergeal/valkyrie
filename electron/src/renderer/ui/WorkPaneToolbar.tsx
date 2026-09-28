@@ -60,6 +60,10 @@ export function WorkPaneToolbar(props: {
    */
   const catalogIcon = catalogOptions[0]?.kind === "SCHEMA" ? "folder" : "database";
 
+  /* 自动化工作流自带工具条，这里不再渲染 */
+  if (activeTab?.kind === "workflow")
+    return null;
+
   return (
     <div className={`pane-toolbar${tabsEmpty ? " is-hidden" : ""}`}>
       {/* 当前标签在对象树里有对应节点时，给一个定位入口 */}

@@ -1317,6 +1317,14 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
   background: var(--panel);
 }
 
+/* 编辑器 + 结果两段布局的容器：自动化工作流标签时整块隐藏但保持挂载 */
+.work-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .work-tabs {
   display: flex;
   align-items: stretch;

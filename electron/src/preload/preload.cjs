@@ -88,6 +88,13 @@ contextBridge.exposeInMainWorld("valkyrie", {
   loadSettings: () => ipcRenderer.invoke("valkyrie:settings-load"),
   saveSettings: settings => ipcRenderer.invoke("valkyrie:settings-save", settings),
 
+  /* 自动化工作流：主进程读写 userData/workflows/<name>.json */
+  listWorkflows: () => ipcRenderer.invoke("valkyrie:workflow-list"),
+  loadWorkflow: name => ipcRenderer.invoke("valkyrie:workflow-load", name),
+  saveWorkflow: payload => ipcRenderer.invoke("valkyrie:workflow-save", payload),
+  deleteWorkflow: name => ipcRenderer.invoke("valkyrie:workflow-delete", name),
+  renameWorkflow: payload => ipcRenderer.invoke("valkyrie:workflow-rename", payload),
+
   /* 本机字体族列表（选项里的字体下拉） */
   listFonts: () => ipcRenderer.invoke("valkyrie:list-fonts")
 });
