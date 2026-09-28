@@ -245,6 +245,87 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
       editor.trigger("keyboard", "editor.action.smartSelect.shrink", null));
 
     /*
+     * Ctrl/Cmd + Shift + U：大小写转换。
+     * 全大写 → 转小写；否则 → 转大写（IntelliJ 的 Toggle Case 行为）。
+     * 无选区（光标）时不处理。
+     *
+     * 传 selections 作为 endCursorState：转换后保留原选区，方便连续转换，
+     * 否则 executeEdits 会把选区收成光标。
+     */
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyU, () => {
+      const model = editor.getModel();
+      const selections = editor.getSelections();
+
+      if (!model || !selections)
+        return;
+
+      const edits = selections
+        .filter(selection => !selection.isEmpty())
+        .map(selection => {
+          const text = model.getValueInRange(selection);
+          const toggled = text === text.toUpperCase() ? text.toLowerCase() : text.toUpperCase();
+
+          return { range: selection, text: toggled, forceMoveMarkers: true };
+        });
+
+      if (edits.length === 0)
+        return;
+
+      editor.pushUndoStop();
+      editor.executeEdits("toggle-case", edits, selections);
+      editor.pushUndoStop();
+    });
+
+    /* Ctrl/Cmd + Alt/Option + Enter：在当前行上方插入一行 */
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.Enter, () =>
+      editor.trigger("keyboard", "editor.action.insertLineBefore", null));
+
+    /* Shift + Enter：在当前行下方插入一行 */
+    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.Enter, () =>
+      editor.trigger("keyboard", "editor.action.insertLineAfter", null));
+
+    /*
+     * Shift + Alt/Option + ↑ / ↓：多选光标。
+     * 记下最近一次增长的方向：同方向继续加；反方向则撤销上一次新增的那一颗
+     * （向下加多了按 ↑ 就回退，而不是在顶部又冒出一颗）。
+     */
+    let cursorGrowDirection: "up" | "down" | null = null;
+
+    function growCursor(direction: "up" | "down") {
+      const model = editor.getModel();
+      const selections = editor.getSelections();
+
+      if (!model || !selections)
+        return;
+
+      /* 只剩一颗（比如中间点过别处）→ 视为重新开始 */
+      if (selections.length <= 1)
+        cursorGrowDirection = null;
+
+      if (cursorGrowDirection && cursorGrowDirection !== direction) {
+        const ordered = [...selections].sort(
+          (a, b) => model.getOffsetAt(a.getStartPosition()) - model.getOffsetAt(b.getStartPosition())
+        );
+        /* 最近新增的那颗：up 方向在最上方，down 方向在最下方 */
+        const remove = cursorGrowDirection === "up" ? ordered[0] : ordered[ordered.length - 1];
+        const remaining = selections.filter(selection => selection !== remove);
+
+        editor.setSelections(remaining);
+
+        if (remaining.length <= 1)
+          cursorGrowDirection = null;
+
+        return;
+      }
+
+      editor.trigger("keyboard", direction === "up" ? "editor.action.insertCursorAbove" : "editor.action.insertCursorBelow", null);
+      cursorGrowDirection = direction;
+    }
+
+    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.UpArrow, () => growCursor("up"));
+    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.DownArrow, () => growCursor("down"));
+
+    /*
      * 容器从 0 高 / 收起切到可见时补一次分词：
      * Monaco 按「写入内容那一刻的可见范围」分词，若那时容器只有几像素高，
      * 之后 automaticLayout 只会重排视口，不会补分词，整段 SQL 就一直是默认色，
