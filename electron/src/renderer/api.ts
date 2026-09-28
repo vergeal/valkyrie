@@ -227,6 +227,9 @@ declare global {
       chooseSavePath?: (options: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
       chooseOpenPath?: (options: { title?: string; defaultPath?: string; directory?: boolean; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
       revealPath?: (target: string) => Promise<boolean>;
+      /** 读写文本文件（自动化读 .sql / 导出结果） */
+      readTextFile?: (target: string) => Promise<string | null>;
+      writeTextFile?: (payload: { path: string; text: string }) => Promise<boolean>;
       showMessage?: (options: MessageOptions) => Promise<number>;
       showMenu?: (options: { items: NativeMenuItem[] }) => Promise<string | null>;
       setNativeTheme?: (theme: string) => Promise<boolean>;
@@ -313,6 +316,16 @@ export function chooseOpenPath(options: { title?: string; defaultPath?: string; 
 
 export function revealPath(target: string): Promise<boolean> {
   return window.valkyrie?.revealPath?.(target) ?? Promise.resolve(false);
+}
+
+/** 读文本文件（自动化读 .sql 脚本） */
+export function readTextFile(target: string): Promise<string | null> {
+  return window.valkyrie?.readTextFile?.(target) ?? Promise.resolve(null);
+}
+
+/** 写文本文件（自动化导出结果） */
+export function writeTextFile(path: string, text: string): Promise<boolean> {
+  return window.valkyrie?.writeTextFile?.({ path, text }) ?? Promise.resolve(false);
 }
 
 /** 弹系统原生消息框（返回按钮下标） */

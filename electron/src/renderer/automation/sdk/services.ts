@@ -69,12 +69,56 @@ export interface VariableStore {
 
 export interface NodeServices {
   database: DatabaseService;
+  workspace: WorkspaceService;
   secrets: SecretsService;
   files: FileService;
   http: HttpService;
   notify: NotifyService;
   logger: LoggerService;
   variables: VariableStore;
+}
+
+/* ------------------------------ 工作区（驱动客户端界面） ------------------------------ */
+
+export interface ConnectionInfo {
+  name: string;
+  type: string;
+}
+
+export interface DatabaseInfo {
+  label: string;
+  kind: string;
+}
+
+export interface QueryTabInfo {
+  id: string;
+  title: string;
+  connection?: string;
+  catalog?: string;
+  schema?: string;
+}
+
+export interface OpenTabOptions {
+  connection?: string;
+  catalog?: string;
+  schema?: string;
+  title?: string;
+  sql?: string;
+}
+
+/** 让自动化直接操作客户端的连接会话与查询标签页，结果留在界面供人工查看/复制 */
+export interface WorkspaceService {
+  listConnections(): ConnectionInfo[];
+  listOpenConnections(): string[];
+  openConnection(name: string): Promise<void>;
+  closeConnection(name: string): Promise<void>;
+  listDatabases(connection: string): Promise<DatabaseInfo[]>;
+  openTab(options: OpenTabOptions): string;
+  setTabSql(tabId: string, sql: string, activate?: boolean): void;
+  runTab(tabId: string): Promise<void>;
+  activateTab(tabId: string): void;
+  closeTab(tabId: string): void;
+  tabs(): QueryTabInfo[];
 }
 
 export interface ServiceMap {

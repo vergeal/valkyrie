@@ -471,6 +471,27 @@ function registerIpc() {
     return true;
   });
 
+  /* 读写文本文件（自动化读取 .sql 脚本、导出结果文件） */
+  ipcMain.handle("valkyrie:read-text-file", async (_event, target) => {
+    try {
+      return fs.readFileSync(String(target), "utf8");
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle("valkyrie:write-text-file", async (_event, payload) => {
+    try {
+      const target = String(payload && payload.path);
+
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, String((payload && payload.text) ?? ""), "utf8");
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
   /* 选择文件（SQLite 数据库文件等）：由主进程弹系统对话框 */
   ipcMain.handle("valkyrie:choose-open-path", async (event, options) => {
     const owner = BrowserWindow.fromWebContents(event.sender);

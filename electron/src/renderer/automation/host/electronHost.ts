@@ -1,4 +1,4 @@
-import { invoke, type QueryResultPayload, type SavedConnection } from "../../api";
+import { invoke, readTextFile, writeTextFile, chooseOpenPath, chooseSavePath, type QueryResultPayload, type SavedConnection } from "../../api";
 import { toast } from "sonner";
 import type {
   DatabaseService,
@@ -9,7 +9,8 @@ import type {
   NotifyService,
   NotifyOptions,
   SecretsService,
-  VariableStore
+  VariableStore,
+  WorkspaceService
 } from "../sdk";
 
 function toTable(result: QueryResultPayload) {
@@ -77,21 +78,29 @@ class NoopSecrets implements SecretsService {
   }
 }
 
-class UnsupportedFiles implements FileService {
-  async readText(): Promise<string> {
-    throw new Error("文件读取暂未开放");
+class HostFiles implements FileService {
+  async readText(path: string): Promise<string> {
+    const content = await readTextFile(path);
+
+    if (content == null)
+      throw new Error(`文件读取失败：${path}`);
+
+    return content;
   }
 
-  async writeText(): Promise<void> {
-    throw new Error("文件写入暂未开放");
+  async writeText(path: string, text: string): Promise<void> {
+    const ok = await writeTextFile(path, text);
+
+    if (!ok)
+      throw new Error(`文件写入失败：${path}`);
   }
 
-  async chooseOpen(): Promise<string | null> {
-    return null;
+  async chooseOpen(options?: { title?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null> {
+    return chooseOpenPath({ title: options?.title, filters: options?.filters });
   }
 
-  async chooseSave(): Promise<string | null> {
-    return null;
+  async chooseSave(options?: { title?: string; defaultPath?: string }): Promise<string | null> {
+    return chooseSavePath({ title: options?.title, defaultPath: options?.defaultPath });
   }
 }
 
@@ -160,13 +169,15 @@ class LocalVariables implements VariableStore {
 
 export interface ElectronHostOptions {
   getConnections: () => SavedConnection[];
+  workspace: WorkspaceService;
 }
 
 export function createElectronServices(options: ElectronHostOptions): NodeServices {
   return {
     database: new ElectronDatabaseService(options.getConnections),
+    workspace: options.workspace,
     secrets: new NoopSecrets(),
-    files: new UnsupportedFiles(),
+    files: new HostFiles(),
     http: new FetchHttp(),
     notify: new ToastNotify(),
     logger: new ConsoleLogger(),

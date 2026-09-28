@@ -65,6 +65,10 @@ contextBridge.exposeInMainWorld("valkyrie", {
 
   revealPath: target => ipcRenderer.invoke("valkyrie:reveal-path", target),
 
+  /* 读写文本文件（自动化读 .sql / 导出结果） */
+  readTextFile: target => ipcRenderer.invoke("valkyrie:read-text-file", target),
+  writeTextFile: payload => ipcRenderer.invoke("valkyrie:write-text-file", payload),
+
   /* 系统原生消息框（错误提示等） */
   showMessage: options => ipcRenderer.invoke("valkyrie:show-message", options),
 

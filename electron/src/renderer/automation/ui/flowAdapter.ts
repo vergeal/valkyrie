@@ -26,9 +26,9 @@ export function toFlowEdges(graph: WorkflowGraph | null | undefined): Edge[] {
     target: edge.target,
     sourceHandle: edge.sourceHandle ?? undefined,
     targetHandle: edge.targetHandle ?? undefined,
-    type: "smoothstep",
+    type: "default",
     animated: true,
-    style: { strokeWidth: 2 }
+    style: { strokeWidth: 3 }
   }));
 }
 
@@ -67,8 +67,8 @@ export function createFlowEdge(source: string, sourceHandle: string, target: str
     sourceHandle,
     target,
     targetHandle,
-    type: "smoothstep",
+    type: "default",
     animated: true,
-    style: { strokeWidth: 2 }
+    style: { strokeWidth: 3 }
   };
 }

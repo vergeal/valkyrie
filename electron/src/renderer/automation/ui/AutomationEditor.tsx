@@ -10,6 +10,7 @@ import {
   useNodesState,
   useReactFlow,
   type Connection,
+  ConnectionLineType,
   type Node
 } from "reactflow";
 import "reactflow/dist/style.css";
@@ -19,21 +20,24 @@ import { Icon } from "../../ui/icons";
 import { nextEdgeId, NodeRegistry, ProviderRegistry, WorkflowEngine } from "../core";
 import { BUILTIN_NODES } from "../nodes";
 import { createElectronServices } from "../host/electronHost";
-import type { ConfigOption, WorkflowGraph } from "../sdk";
+import type { ConfigOption, NodeDefinition, PortDefinition, WorkspaceService } from "../sdk";
 import { AutomationContext } from "./context";
 import {
   AUTOMATION_DND_TYPE,
   AUTOMATION_NODE_TYPE,
+  createFlowEdge,
   createFlowNode,
   toFlowEdges,
   toFlowNodes,
   toGraph,
   type AutomationNodeData
 } from "./flowAdapter";
+import { compatibleNodes, matchPort, portOf, type HandleType } from "./connectCompat";
 import { AutomationNodeView } from "./NodeView";
 import { Inspector } from "./Inspector";
 import { Palette } from "./Palette";
 import { RunPanel } from "./RunPanel";
+import { ConnectMenu, type ConnectMenuState } from "./ConnectMenu";
 import { graphSignature } from "../core";
 import type { RunRecord } from "../core";
 import "./automation.css";
@@ -43,6 +47,7 @@ const NODE_TYPES = { [AUTOMATION_NODE_TYPE]: AutomationNodeView };
 export interface AutomationEditorProps {
   tab: AutomationTab;
   connections: SavedConnection[];
+  workspace: WorkspaceService;
   onChange: (patch: Partial<AutomationTab>) => void;
   onStatus: (message: string) => void;
   onError: (message: string | null) => void;
@@ -56,7 +61,7 @@ export function AutomationEditor(props: AutomationEditorProps) {
   );
 }
 
-function AutomationCanvas({ tab, connections, onChange, onStatus, onError }: AutomationEditorProps) {
+function AutomationCanvas({ tab, connections, workspace, onChange, onStatus, onError }: AutomationEditorProps) {
   const connectionsRef = useRef(connections);
   connectionsRef.current = connections;
 
@@ -71,10 +76,11 @@ function AutomationCanvas({ tab, connections, onChange, onStatus, onError }: Aut
       logo: connection.type
     })));
 
-    const services = createElectronServices({ getConnections: () => connectionsRef.current });
+    const services = createElectronServices({ getConnections: () => connectionsRef.current, workspace });
     const engine = new WorkflowEngine(registry, services);
 
     return { registry, providers, engine };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [options, setOptions] = useState<Record<string, ConfigOption[]>>({});
@@ -99,12 +105,25 @@ function AutomationCanvas({ tab, connections, onChange, onStatus, onError }: Aut
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [run, setRun] = useState<RunRecord | null>(null);
   const [running, setRunning] = useState(false);
+  const [connectMenu, setConnectMenu] = useState<{
+    state: ConnectMenuState;
+    nodes: NodeDefinition[];
+    sourceNodeId: string;
+    sourceHandle: string | null;
+    handleType: HandleType;
+    port: PortDefinition;
+  } | null>(null);
   const flow = useReactFlow<AutomationNodeData>();
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const dirtyRef = useRef(false);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const dragRef = useRef<{ nodeId: string; handleId: string | null; handleType: HandleType } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const connectedRef = useRef(false);
 
   const setConfigValue = useCallback((nodeId: string, key: string, value: unknown) => {
     setNodes(previous => previous.map(node => node.id === nodeId
@@ -129,14 +148,94 @@ function AutomationCanvas({ tab, connections, onChange, onStatus, onError }: Aut
   }, [flow, setNodes]);
 
   const onConnect = useCallback((connection: Connection) => {
+    connectedRef.current = true;
     setEdges(previous => addEdge({
       ...connection,
       id: nextEdgeId(),
-      type: "smoothstep",
+      type: "default",
       animated: true,
-      style: { strokeWidth: 2 }
+      style: { strokeWidth: 3 }
     }, previous));
   }, [setEdges]);
+
+  const onConnectStart = useCallback((_event: unknown, params: { nodeId?: string | null; handleId?: string | null; handleType?: string | null } | null) => {
+    connectedRef.current = false;
+    const point = _event as { clientX?: number; clientY?: number } | null;
+
+    dragStartRef.current = point && typeof point.clientX === "number"
+      ? { x: point.clientX, y: point.clientY ?? 0 }
+      : null;
+    dragRef.current = params?.nodeId
+      ? { nodeId: params.nodeId, handleId: params.handleId ?? null, handleType: params.handleType === "target" ? "target" : "source" }
+      : null;
+  }, []);
+
+  const onConnectEnd = useCallback((event: MouseEvent | TouchEvent) => {
+    const drag = dragRef.current;
+    const start = dragStartRef.current;
+
+    dragRef.current = null;
+    dragStartRef.current = null;
+
+    if (connectedRef.current || !drag)
+      return;
+
+    const point = "clientX" in event ? { x: event.clientX, y: event.clientY } : { x: 0, y: 0 };
+
+    /* 只是点了一下引脚没有拖动：不弹菜单 */
+    if (start && Math.hypot(point.x - start.x, point.y - start.y) < 4)
+      return;
+
+    const node = nodesRef.current.find(item => item.id === drag.nodeId);
+    const port = portOf(runtime.registry, node?.data.nodeType ?? "", drag.handleId);
+
+    if (!port)
+      return;
+
+    const candidates = compatibleNodes(runtime.registry, port, drag.handleType);
+
+    if (candidates.length === 0)
+      return;
+
+    const flowPoint = flow.screenToFlowPosition(point);
+
+    setConnectMenu({
+      state: { screenX: point.x, screenY: point.y, flowX: flowPoint.x, flowY: flowPoint.y },
+      nodes: candidates,
+      sourceNodeId: drag.nodeId,
+      sourceHandle: drag.handleId,
+      handleType: drag.handleType,
+      port
+    });
+  }, [runtime, flow]);
+
+  const pickConnectNode = useCallback((nodeType: string) => {
+    const menu = connectMenu;
+
+    if (!menu)
+      return;
+
+    const definition = runtime.registry.get(nodeType);
+    const port = menu.port;
+
+    setConnectMenu(null);
+
+    if (!definition || !port)
+      return;
+
+    const target = matchPort(definition, port, menu.handleType);
+    const node = createFlowNode(nodeType, { x: menu.state.flowX, y: menu.state.flowY - 30 });
+
+    setNodes(previous => [...previous, node]);
+
+    if (target && menu.sourceHandle) {
+      const edge = menu.handleType === "source"
+        ? createFlowEdge(menu.sourceNodeId, menu.sourceHandle, node.id, target.id)
+        : createFlowEdge(node.id, target.id, menu.sourceNodeId, menu.sourceHandle);
+
+      setEdges(previous => addEdge(edge, previous));
+    }
+  }, [connectMenu, runtime, setNodes, setEdges]);
 
   const deleteNode = useCallback((nodeId: string) => {
     setNodes(previous => previous.filter(node => node.id !== nodeId));
@@ -345,11 +444,16 @@ function AutomationCanvas({ tab, connections, onChange, onStatus, onError }: Aut
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
+              onConnectStart={onConnectStart}
+              onConnectEnd={onConnectEnd}
               onSelectionChange={({ nodes: selectedNodes }) => setSelectedId(selectedNodes[0]?.id ?? null)}
               onEdgeDoubleClick={(event, edge) => {
                 event.preventDefault();
                 setEdges(previous => previous.filter(item => item.id !== edge.id));
               }}
+              connectionLineType={ConnectionLineType.Bezier}
+              connectionLineStyle={{ strokeWidth: 3 }}
+              defaultEdgeOptions={{ type: "default", style: { strokeWidth: 3 } }}
               defaultViewport={tab.graph.viewport}
               fitView={!tab.graph.viewport}
               fitViewOptions={{ padding: 0.2 }}
@@ -362,6 +466,15 @@ function AutomationCanvas({ tab, connections, onChange, onStatus, onError }: Aut
               <MiniMap pannable zoomable />
               <Controls />
             </ReactFlow>
+
+            {connectMenu && (
+              <ConnectMenu
+                nodes={connectMenu.nodes}
+                state={connectMenu.state}
+                onPick={pickConnectNode}
+                onClose={() => setConnectMenu(null)}
+              />
+            )}
           </div>
 
           <div className="am-side">

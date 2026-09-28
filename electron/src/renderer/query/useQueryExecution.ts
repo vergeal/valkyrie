@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type * as monaco from "monaco-editor";
 import { invoke, messageOf, onEvent, type ProgressEvent, type QueryResultPayload } from "../api";
-import type { SessionState, WorkTab } from "../app/appTypes";
+import type { QueryTab, SessionState, WorkTab } from "../app/appTypes";
 import type { ResultPane } from "../app/appTypes";
 import { formatErrorLog, formatProgress } from "../app/format";
 import { appendLog, appendLogs, errorRecord, progressRecord, type LogRecord } from "../ui/LogConsole";
@@ -135,13 +135,14 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     };
   }, [setTabs]);
 
-  async function runQuery(tabId: string, sql: string) {
+  async function runQuery(tabId: string, sql: string, contextOverride?: QueryTab["path"]) {
     if (!sql.trim())
       return;
 
     const jobId = Date.now();
     const tab = tabs.find(item => item.id === tabId);
-    const context = tab?.kind === "query" ? tab.path : {};
+    /* 自动化会在建页的同一拍就执行，tabs 闭包里可能还没有这个新页，允许直接传入执行上下文 */
+    const context = contextOverride ?? (tab?.kind === "query" ? tab.path : {});
     /* 用这个控制台所属连接的会话，多连接并存时不会串到别的连接上 */
     const target = resolveSessionByName(context.connection);
 

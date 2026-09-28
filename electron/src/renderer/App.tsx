@@ -4,7 +4,7 @@ import {
   writeClipboard,
   type SchemaNode
 } from "./api";
-import type { ResultPane, SessionState, WorkTab } from "./app/appTypes";
+import type { QueryTab, ResultPane, SessionState, WorkTab } from "./app/appTypes";
 import { NEXT_THEME, THEME_ICON, THEME_LABEL } from "./app/appConstants";
 import { useAppSettings } from "./app/useAppSettings";
 import { useAppTheme } from "./app/useAppTheme";
@@ -31,11 +31,13 @@ import {
 import {
   connectionOfTab,
   moveTabInList,
+  newQueryTab,
   tabIconName,
   tabKindLabel,
   treeNodeOfTab,
   type SqlResolver
 } from "./tabs/tabHelpers";
+import type { WorkspaceService } from "./automation/sdk";
 import { type TableContext } from "./table/tableActions";
 import { useTableData } from "./table/useTableData";
 import { useTableDesign } from "./table/useTableDesign";
@@ -173,6 +175,27 @@ export function App() {
 
   /* 关闭窗口 / 退出前：先确认有没有未保存的标签页 */
   useCloseGuard(tabs, resolveSql);
+
+  /* 自动化「工作区服务」读取最新状态的 ref（适配器保持稳定，不随每次渲染重建） */
+  const connectionsRef = useRef(connections);
+  const openSessionsRef = useRef(openSessions);
+  const rootsByConnectionRef = useRef(rootsByConnection);
+  const workspaceTabsRef = useRef(tabs);
+  const openConnectionRef = useRef(openConnection);
+  const disconnectRef = useRef(disconnect);
+  const closeTabRef = useRef(closeTab);
+  const updateTabRef = useRef(updateTab);
+  /* 自动化刚建的查询页：同一拍就要执行，React 状态还没落地，用这个同步映射兜住 */
+  const automationTabsRef = useRef<Map<string, QueryTab>>(new Map());
+
+  connectionsRef.current = connections;
+  openSessionsRef.current = openSessions;
+  rootsByConnectionRef.current = rootsByConnection;
+  workspaceTabsRef.current = tabs;
+  openConnectionRef.current = openConnection;
+  disconnectRef.current = disconnect;
+  closeTabRef.current = closeTab;
+  updateTabRef.current = updateTab;
 
   /*
    * 「对象信息」看的是用户当前焦点：在数据表 / 设计页操作时跟着那张表走，
@@ -493,7 +516,7 @@ export function App() {
 
   /* 查询执行域：执行 / 取消 / 执行计划 / 格式化 / progress 日志 */
   const {
-    stopQuery, formatActiveQuery, explainActiveQuery, runSelectionOrAll
+    runQuery, stopQuery, formatActiveQuery, explainActiveQuery, runSelectionOrAll
   } = useQueryExecution({
     tabs, updateTab, setTabs, activeTab, editorRef,
     resolveSessionByName: name => sessionByName(name),
@@ -502,6 +525,82 @@ export function App() {
     logLimit: settings.logLimit,
     resolveSql
   });
+
+  const runQueryRef = useRef(runQuery);
+  runQueryRef.current = runQuery;
+
+  /** 自动化用：按显式连接/库建一个查询页并返回 tabId */
+  function openWorkspaceTab(options: { connection?: string; catalog?: string; schema?: string; title?: string; sql?: string }): string {
+    const tab = newQueryTab();
+
+    tab.path = { connection: options.connection, catalog: options.catalog, schema: options.schema };
+
+    if (options.sql != null)
+      tab.sql = options.sql;
+
+    if (options.title)
+      tab.title = options.title;
+
+    automationTabsRef.current.set(tab.id, tab);
+    setTabs(previous => [...previous, tab]);
+    setActiveTabId(tab.id);
+
+    return tab.id;
+  }
+
+  /*
+   * 自动化「工作区服务」：让工作流直接驱动客户端的连接与查询页，
+   * 结果留在界面供人工查看 / 复制。方法内统一走 ref 读最新状态，适配器本身保持稳定。
+   */
+  const automationWorkspace = useMemo<WorkspaceService>(() => ({
+    listConnections: () => connectionsRef.current.map(item => ({ name: item.name, type: item.type })),
+    listOpenConnections: () => Object.keys(openSessionsRef.current),
+    openConnection: async name => {
+      const config = connectionsRef.current.find(item => item.name === name);
+
+      if (!config)
+        throw new Error(`连接「${name}」不存在`);
+
+      const opened = await openConnectionRef.current(config);
+
+      if (!opened)
+        throw new Error(`连接「${name}」打开失败`);
+    },
+    closeConnection: async name => {
+      await disconnectRef.current(name, { confirmed: true });
+    },
+    listDatabases: async connection =>
+      (rootsByConnectionRef.current[connection] ?? []).map(node => ({ label: node.label, kind: node.kind })),
+    openTab: options => openWorkspaceTab(options),
+    setTabSql: (tabId, sql, activate) => {
+      updateTabRef.current(tabId, { sql });
+
+      if (activate)
+        setActiveTabId(tabId);
+    },
+    runTab: async tabId => {
+      const tab = automationTabsRef.current.get(tabId) ?? workspaceTabsRef.current.find(item => item.id === tabId);
+
+      if (!tab || tab.kind !== "query")
+        throw new Error("查询页不存在");
+
+      await runQueryRef.current(tabId, tab.sql, tab.path);
+    },
+    activateTab: tabId => setActiveTabId(tabId),
+    closeTab: tabId => {
+      void closeTabRef.current(tabId);
+    },
+    tabs: () => workspaceTabsRef.current
+      .filter((item): item is QueryTab => item.kind === "query")
+      .map(item => ({
+        id: item.id,
+        title: item.title,
+        connection: item.path.connection,
+        catalog: item.path.catalog,
+        schema: item.path.schema
+      }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
 
 
   /* ------------------------------ 视图派生数据 ------------------------------ */
@@ -863,6 +962,7 @@ export function App() {
               key={activeTab.id}
               tab={activeTab}
               connections={connections}
+              workspace={automationWorkspace}
               onChange={patch => updateTab(activeTab.id, patch)}
               onStatus={setStatus}
               onError={setError}

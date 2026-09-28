@@ -15,6 +15,12 @@ import openConnection from "./open-connection";
 import closeConnection from "./close-connection";
 import query from "./query";
 import executeSql from "./execute-sql";
+import openConnectionUi from "./open-connection-ui";
+import openQueryTab from "./open-query-tab";
+import executeScript from "./execute-script";
+import activateTab from "./activate-tab";
+import foreachConnection from "./foreach-connection";
+import foreachDatabase from "./foreach-database";
 
 /**
  * 内置节点清单。新增一个节点只需：写一个文件 + 在这里加一行（或用外部插件目录）。
@@ -36,7 +42,13 @@ export const BUILTIN_NODES: NodeDefinition[] = [
   openConnection,
   closeConnection,
   query,
-  executeSql
+  executeSql,
+  foreachConnection,
+  foreachDatabase,
+  openConnectionUi,
+  openQueryTab,
+  executeScript,
+  activateTab
 ];
 
 export default BUILTIN_NODES;
