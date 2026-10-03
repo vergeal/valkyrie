@@ -134,23 +134,45 @@ class JavaBridge extends EventEmitter {
   async stop() {
     const child = this.child;
 
-    if (!child)
+    if (!child) {
+      this.child = null;
       return;
+    }
 
-    /* 关闭标准输入即通知数据层退出，进程会先排空正在执行的请求 */
-    const exited = new Promise(resolve => child.once("exit", resolve));
+    /* 进程已经退出（exit 还没被监听 / 竞态）：直接当停好，绝不等待一个不会再来的事件 */
+    if (child.exitCode !== null || child.signalCode !== null) {
+      this.child = null;
+      return;
+    }
 
-    child.stdin.end();
+    /* exit 与 close 都听，哪边先到算哪边 */
+    const exited = new Promise(resolve => {
+      child.once("exit", resolve);
+      child.once("close", resolve);
+    });
+
+    try {
+      child.stdin.end();
+    } catch {
+      /* 标准输入可能已经关了，忽略 */
+    }
 
     const killed = setTimeout(() => {
-      if (this.child)
-        child.kill();
+      if (this.child) {
+        try {
+          child.kill();
+        } catch {
+          /* 进程可能刚好退出，忽略 */
+        }
+      }
     }, 5000);
 
     killed.unref();
 
-    await exited;
+    /* 兜底：即便拿不到 exit / close，最多再等 8 秒也要返回，避免退出被卡死 */
+    await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 8000))]);
     clearTimeout(killed);
+    this.child = null;
   }
 
   #handleLine(line) {

@@ -29,6 +29,8 @@ let dataReady = false;
 let closeApproved = false;
 let pendingQuit = false;
 let stopRequested = false;
+/* 渲染进程是否已经崩溃 / 消失：此时不能再等它回关闭确认，否则会永远退不掉 */
+let rendererGone = false;
 
 function revealMainWindow() {
   if (!dataReady || !mainWindowReady || !mainWindow)
@@ -203,6 +205,7 @@ function createWindow() {
   /* 每次新建窗口都是一次全新的关闭确认流程（macOS 关窗不退出，重开窗口后仍要检查） */
   closeApproved = false;
   pendingQuit = false;
+  rendererGone = false;
 
   /* 读一下客户端设置：启动是否最大化（默认是） */
   startMaximized = true;
@@ -257,6 +260,19 @@ function createWindow() {
   });
   mainWindow.on("closed", () => {
     mainWindow = null;
+  });
+
+  /*
+   * 渲染进程崩溃 / 被系统回收：标记不可用。关闭或退出时不再等它回确认，
+   * 否则主进程会卡在「等关闭确认」上退不掉。
+   */
+  mainWindow.webContents.on("render-process-gone", () => {
+    rendererGone = true;
+
+    if (pendingQuit) {
+      closeApproved = true;
+      app.quit();
+    }
   });
 
   /* 点关闭（标题栏 / 菜单「退出」）先经渲染层确认未保存标签，确认后才真正关闭 */
@@ -754,7 +770,10 @@ app.on("window-all-closed", () => {
  * 窗口 / 渲染进程不可用（启动期、已销毁）时直接放行，避免关不掉。
  */
 function requestCloseConfirmation() {
-  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) {
+  const contents = mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null;
+  const usable = contents && !contents.isDestroyed() && !contents.isCrashed() && !rendererGone;
+
+  if (!usable) {
     closeApproved = true;
 
     if (pendingQuit) {
@@ -767,7 +786,19 @@ function requestCloseConfirmation() {
     return;
   }
 
-  mainWindow.webContents.send("valkyrie:close-request");
+  try {
+    contents.send("valkyrie:close-request");
+  } catch {
+    /* 发送失败（进程刚好崩）：直接放行，避免卡住 */
+    closeApproved = true;
+
+    if (pendingQuit) {
+      pendingQuit = false;
+      app.quit();
+    } else if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.close();
+    }
+  }
 }
 
 app.on("before-quit", event => {
@@ -786,5 +817,27 @@ app.on("before-quit", event => {
   event.preventDefault();
   stopRequested = true;
 
-  bridge.stop().finally(() => app.quit());
+  /* 兜底：无论数据层停不停得掉，最多 4 秒后强制退出，避免应用卡住关不掉 */
+  const forceExit = setTimeout(() => app.exit(0), 4000);
+
+  forceExit.unref();
+
+  Promise.resolve(bridge.stop())
+    .catch(error => process.stderr.write(`[valkyrie] 数据层停止失败: ${error && error.message ? error.message : error}\n`))
+    .finally(() => app.exit(0));
+});
+
+/*
+ * 主进程的兜底异常处理：默认情况下 Electron 会弹「A JavaScript error occurred in the
+ * main process」并可能阻塞退出。这里统一记日志；若正在退出，直接强制退出。
+ */
+process.on("uncaughtException", error => {
+  process.stderr.write(`[valkyrie] 主进程未捕获异常: ${error && error.stack ? error.stack : error}\n`);
+
+  if (stopRequested || pendingQuit)
+    app.exit(0);
+});
+
+process.on("unhandledRejection", reason => {
+  process.stderr.write(`[valkyrie] 主进程未处理的 Promise 拒绝: ${reason && reason.stack ? reason.stack : reason}\n`);
 });
