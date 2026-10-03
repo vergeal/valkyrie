@@ -1,4 +1,4 @@
-import { dataIn, defineNode, execIn, execOut } from "../sdk";
+import { dataIn, dataOut, defineNode, execIn, execOut } from "../sdk";
 
 export default defineNode({
   manifest: {
@@ -8,11 +8,11 @@ export default defineNode({
     version: 1,
     icon: "plug",
     color: "#0d9488",
-    description: "在客户端里打开连接会话（对象树 / 页签都在界面上），已打开则复用",
+    description: "在客户端里打开连接会话（对象树 / 页签都在界面上），已打开则复用；输出连接供下游接线",
     requires: ["workspace"],
     risk: "read",
     inputs: [execIn(), dataIn("connection", "连接", "connection")],
-    outputs: [execOut()],
+    outputs: [execOut(), dataOut("connection", "连接", "connection")],
     config: [{ key: "connection", label: "连接", type: "connection", required: true, optionsSource: "connections", inline: true }]
   },
   execute: async ({ ctx, inputs, config }) => {
@@ -26,6 +26,6 @@ export default defineNode({
       ctx.logger.log("info", `已在界面打开连接「${connection}」`);
     }
 
-    return {};
+    return { outputs: { connection } };
   }
 });

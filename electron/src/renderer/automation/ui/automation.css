@@ -273,6 +273,15 @@
 
 .am-select.is-placeholder { color: var(--muted); }
 
+.am-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.am-file .am-input { flex: 1; min-width: 0; }
+.am-file .tbtn { flex: none; }
+
 .am-checkbox {
   display: inline-flex;
   align-items: center;

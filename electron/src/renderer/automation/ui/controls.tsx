@@ -1,4 +1,5 @@
 import { type ReactElement } from "react";
+import { chooseOpenPath } from "../../api";
 import type { ConfigField, ConfigOption } from "../sdk";
 
 export interface ControlProps {
@@ -109,6 +110,37 @@ function PasswordControl({ field, value, onChange }: ControlProps): ReactElement
   );
 }
 
+function FileControl({ field, value, onChange }: ControlProps): ReactElement {
+  return (
+    <span className="am-file">
+      <input
+        className="am-input"
+        value={typeof value === "string" ? value : ""}
+        placeholder={field.placeholder ?? "选择文件"}
+        onChange={event => onChange(event.target.value)}
+      />
+      <button
+        type="button"
+        className="tbtn"
+        onClick={async () => {
+          const picked = await chooseOpenPath({
+            title: field.label,
+            filters: [
+              { name: "SQL 脚本", extensions: ["sql"] },
+              { name: "所有文件", extensions: ["*"] }
+            ]
+          });
+
+          if (picked)
+            onChange(picked);
+        }}
+      >
+        浏览…
+      </button>
+    </span>
+  );
+}
+
 controlRegistry.register("text", TextControl);
 controlRegistry.register("textarea", TextareaControl);
 controlRegistry.register("number", NumberControl);
@@ -117,6 +149,7 @@ controlRegistry.register("select", SelectControl);
 controlRegistry.register("connection", SelectControl);
 controlRegistry.register("code", CodeControl);
 controlRegistry.register("password", PasswordControl);
+controlRegistry.register("file", FileControl);
 controlRegistry.register("keyvalue", CodeControl);
 
 export function renderControl(field: ConfigField, value: unknown, options: ConfigOption[], onChange: (value: unknown) => void): ReactElement {

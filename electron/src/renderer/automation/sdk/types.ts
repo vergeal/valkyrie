@@ -40,6 +40,7 @@ export type ConfigFieldType =
   | "code"
   | "password"
   | "connection"
+  | "file"
   | "keyvalue";
 
 export interface ConfigOption {
