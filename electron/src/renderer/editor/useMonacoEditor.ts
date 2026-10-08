@@ -121,6 +121,12 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
       },
       /* 右键菜单换成 FX 版那套（自己接管），关掉 Monaco 内置的 */
       contextmenu: false,
+      /*
+       * 补全 / 悬浮提示用 fixed 定位独立渲染：编辑器在 overflow:hidden 的面板里，
+       * 光标到最后一行时弹窗会被面板裁掉，fixed 让它按窗口边界钳制后完整浮出。
+       * 不传 overflowWidgetsDomNode，弹窗仍留在编辑器子树内，现有主题样式照常生效。
+       */
+      fixedOverflowWidgets: true,
       /* 补全走 Monaco 内置弹窗；候选由下面注册的 Provider 提供 */
       quickSuggestions: initial.suggestEnabled ? { other: true, comments: false, strings: false } : false,
       suggestOnTriggerCharacters: initial.suggestEnabled,
@@ -324,6 +330,19 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
 
     editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.UpArrow, () => growCursor("up"));
     editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.DownArrow, () => growCursor("down"));
+
+    /*
+     * Alt/Option + ← / →：按单词移动光标；带 Shift 则按单词扩选。
+     * Monaco 在部分平台上没有默认绑定，这里显式补上，保证按住 Option 就能整词跳。
+     */
+    editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.LeftArrow, () =>
+      editor.trigger("keyboard", "cursorWordLeft", null));
+    editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.RightArrow, () =>
+      editor.trigger("keyboard", "cursorWordRight", null));
+    editor.addCommand(monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.LeftArrow, () =>
+      editor.trigger("keyboard", "cursorWordLeftSelect", null));
+    editor.addCommand(monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.RightArrow, () =>
+      editor.trigger("keyboard", "cursorWordRightSelect", null));
 
     /*
      * 容器从 0 高 / 收起切到可见时补一次分词：

@@ -46,6 +46,7 @@ function attachWindowState(window) {
  * 这两个都不能在这里拦掉（窗口本身没有系统菜单，Ctrl+W 不会误关窗口）。
  * 同理 Ctrl+F / Ctrl+G / Ctrl+H 不能拦：浏览器那套「页内查找 / 找下一个 / 历史」
  * 在桌面客户端里本来就没用，但它们是编辑器自己的「查找 / 跳到行 / 替换」。
+ * Alt/Option + ←/→ 也不能拦：它是编辑器的「按单词移动光标」。
  */
 function disableBrowserShortcuts(window) {
   /* 这几个在浏览器里是打印 / 查看源码 / 下载 / 新窗口 / 打开文件 / 新标签页，客户端用不上 */
@@ -68,8 +69,8 @@ function disableBrowserShortcuts(window) {
       (ctrl && zoomKeys.has(key)) ||
       blockedKeys.has(key) ||
       (ctrl && shift && (key === "i" || key === "j" || key === "c")) ||
-      (input.alt && (key === "arrowleft" || key === "arrowright")) ||
-      key === "browserback";
+      key === "browserback" ||
+      key === "browserforward";
 
     if (blocked)
       event.preventDefault();
