@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { invoke, messageOf, type SchemaNode, type ScriptFile } from "../api";
-import type { ObjectTab, ObjectTabTables, SessionState, WorkTab } from "../app/appTypes";
+import type { ObjectTab, ObjectTabTables, QueryTab, SessionState, WorkTab } from "../app/appTypes";
 import { OBJECT_TAB_TITLE } from "../app/appConstants";
 import { connectionOfTab, findObjectTab, newQueryTab, nextTabId, type SqlResolver } from "../tabs/tabHelpers";
 
@@ -39,6 +39,8 @@ export interface UseObjectPageDeps {
   objectTabIdRef: { current: string | null };
   /** 取标签的最新编辑器内容（内容可能还没同步进 tabs 状态） */
   resolveSql?: SqlResolver;
+  /** 打开脚本后按需执行；由 App 在执行域建好后回填（Ctrl+双击脚本用） */
+  runScriptRef: { current: (tabId: string, sql: string, context?: QueryTab["path"]) => Promise<void> };
 }
 
 /**
@@ -51,7 +53,7 @@ export function useObjectPage(deps: UseObjectPageDeps) {
     tabs, setTabs, updateTab, setActiveTabId, activeTab,
     sessionOfNode, connectionOfNode, sessionByName, loadTableNodes, firstTableContainer, parentTreeNode,
     loadChildren, treeChildren, askText, askConfirm, setError, setStatus, setPending,
-    objectTargetRef, objectTabIdRef, resolveSql
+    objectTargetRef, objectTabIdRef, resolveSql, runScriptRef
   } = deps;
 
   /* 「对象」页选中的行（按表名匹配：树与列表分属两次查询，节点 id 不同；支持多选） */
@@ -306,8 +308,11 @@ export function useObjectPage(deps: UseObjectPageDeps) {
     return {};
   }
 
-  /** 打开脚本文件（对象树里的脚本节点与「脚本」页共用一条路径） */
-  async function openScriptFile(file: { name: string; scope: string; connection?: string; catalog?: string; schema?: string }) {
+  /** 打开脚本文件（对象树里的脚本节点与「脚本」页共用一条路径）；run=true 时打开后自动执行 */
+  async function openScriptFile(
+    file: { name: string; scope: string; connection?: string; catalog?: string; schema?: string },
+    run = false
+  ): Promise<QueryTab | undefined> {
     /*
      * 脚本属于某个连接，打开时必须用那一条：显式指定连接却没开时直接报错，
      * 绝不能退回活动会话 —— 否则点 A 的脚本会开成 B 的控制台。
@@ -316,47 +321,56 @@ export function useObjectPage(deps: UseObjectPageDeps) {
 
     if (!owner) {
       setError(file.connection ? `连接 ${file.connection} 未打开，无法打开脚本` : "请先在左侧选择一个连接");
-      return;
+      return undefined;
     }
 
     const connection = owner.name;
-    const existing = tabs.find(tab =>
+    const existing = tabs.find((tab): tab is QueryTab =>
       tab.kind === "query" && tab.script?.name === file.name && tab.script?.catalog === file.scope
       && tab.script?.connection === connection);
 
+    let tab: QueryTab | undefined;
+
     if (existing) {
       setActiveTabId(existing.id);
-      return;
+      tab = existing;
+    } else {
+      /*
+       * 执行上下文与目录名要分开：目录名可能是个模式（达梦 / PostgreSQL），
+       * 直接塞进 path.catalog 会在执行时 setCatalog(模式名) 而找不到表。
+       */
+      const context = file.catalog != null || file.schema != null
+        ? { catalog: file.catalog ?? undefined, schema: file.schema ?? undefined }
+        : folderContext(connection, file.scope);
+
+      try {
+        const payload = await invoke<{ content: string }>("queryFiles.read", {
+          connection,
+          catalog: file.scope,
+          name: file.name
+        });
+
+        const created = newQueryTab();
+        created.title = file.name;
+        created.sql = payload.content;
+        created.savedSql = payload.content;
+        created.script = { connection, catalog: file.scope, name: file.name };
+        created.path = { connection, catalog: context.catalog, schema: context.schema };
+
+        setTabs(previous => [...previous, created]);
+        setActiveTabId(created.id);
+        setStatus(`已打开脚本 ${file.name}`);
+        tab = created;
+      } catch (e) {
+        setError(messageOf(e));
+        return undefined;
+      }
     }
 
-    /*
-     * 执行上下文与目录名要分开：目录名可能是个模式（达梦 / PostgreSQL），
-     * 直接塞进 path.catalog 会在执行时 setCatalog(模式名) 而找不到表。
-     */
-    const context = file.catalog != null || file.schema != null
-      ? { catalog: file.catalog ?? undefined, schema: file.schema ?? undefined }
-      : folderContext(connection, file.scope);
+    if (run && tab)
+      await runScriptRef.current(tab.id, tab.sql, tab.path);
 
-    try {
-      const payload = await invoke<{ content: string }>("queryFiles.read", {
-        connection,
-        catalog: file.scope,
-        name: file.name
-      });
-
-      const tab = newQueryTab();
-      tab.title = file.name;
-      tab.sql = payload.content;
-      tab.savedSql = payload.content;
-      tab.script = { connection, catalog: file.scope, name: file.name };
-      tab.path = { connection, catalog: context.catalog, schema: context.schema };
-
-      setTabs(previous => [...previous, tab]);
-      setActiveTabId(tab.id);
-      setStatus(`已打开脚本 ${file.name}`);
-    } catch (e) {
-      setError(messageOf(e));
-    }
+    return tab;
   }
 
   /**
@@ -374,22 +388,22 @@ export function useObjectPage(deps: UseObjectPageDeps) {
     return matches.find(name => name === sessionRef.current?.name) ?? matches[0];
   }
 
-  async function openScript(node: SchemaNode) {
+  async function openScript(node: SchemaNode, run = false) {
     const scope = node.scope ?? node.catalog ?? node.schema ?? "default";
     const connection = connectionOfNode(node) ?? connectionByScope(scope);
 
     if (!connection) {
       setError("无法确定脚本所属连接，请先在左侧选择连接后再打开");
-      return;
+      return undefined;
     }
 
-    await openScriptFile({
+    return openScriptFile({
       name: node.label,
       scope,
       connection,
       catalog: node.catalog,
       schema: node.schema
-    });
+    }, run);
   }
 
   /** 当前上下文所属的脚本目录（连接下的库或模式名） */

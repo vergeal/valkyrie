@@ -16,7 +16,7 @@ export function SidePanel(props: {
   onRefreshConnections: () => void;
   onToggle: (node: SchemaNode) => void;
   onSelect: (node: SchemaNode) => void;
-  onActivate: (node: SchemaNode) => void;
+  onActivate: (node: SchemaNode, run?: boolean) => void;
   onOpenData: (node: SchemaNode) => void;
   onDesign: (node: SchemaNode) => void;
   onCopyName: (node: SchemaNode) => void;

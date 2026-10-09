@@ -19,7 +19,7 @@ export interface SchemaActionsDeps {
   focusObjectPage: (name: string, context?: { session?: SessionState | null; roots?: SchemaNode[] | null }) => void;
   showScriptList: (options?: { force?: boolean; highlightName?: string; source?: SchemaNode; session?: SessionState | null; activate?: boolean }) => void;
   showTableList: (node: SchemaNode, options?: { force?: boolean; quiet?: boolean; activate?: boolean; session?: SessionState | null }) => void;
-  openScript: (node: SchemaNode) => void;
+  openScript: (node: SchemaNode, run?: boolean) => void;
   openScriptList: () => void;
   openTableList: (node: SchemaNode) => void;
   openTableData: (node: SchemaNode) => void;
@@ -120,8 +120,8 @@ export function useSchemaActions(deps: SchemaActionsDeps) {
       void showTableList(node, { quiet: true });
   }
 
-  /* 双击对象：连接 / 展开 / 打开数据 */
-  function activateNode(node: SchemaNode) {
+  /* 双击对象：连接 / 展开 / 打开数据；run=true（Ctrl/Cmd+双击脚本）时打开后自动执行 */
+  function activateNode(node: SchemaNode, run = false) {
     /*
      * 表双击固定「打开数据」，不展开 —— 展开只能点行首的三角，
      * 否则双击打开数据的操作会被误当成展开，用起来很别扭。
@@ -131,9 +131,9 @@ export function useSchemaActions(deps: SchemaActionsDeps) {
       return;
     }
 
-    /* 查询脚本文件：双击打开到查询控制台 */
+    /* 查询脚本文件：双击打开到查询控制台（Ctrl/Cmd 双击顺带执行） */
     if (node.kind === "QUERY" && node.path) {
-      void openScript(node);
+      void openScript(node, run);
       return;
     }
 

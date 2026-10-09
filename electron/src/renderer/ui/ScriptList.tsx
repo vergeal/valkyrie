@@ -14,7 +14,7 @@ interface ScriptListProps {
   flashToken?: number;
   selectedPaths: string[];
   onSelectionChange: (paths: string[]) => void;
-  onOpen: (script: ScriptFile) => void;
+  onOpen: (script: ScriptFile, run?: boolean) => void;
   onContextMenu: (script: ScriptFile) => void;
 }
 
@@ -160,7 +160,8 @@ export function ScriptList(props: ScriptListProps) {
               key={script.path}
               className={selectedSet.has(script.path) ? "is-active" : undefined}
               onClick={event => selectRow(event, index)}
-              onDoubleClick={() => onOpen(script)}
+              /* Ctrl/Cmd + 双击：打开脚本并自动执行；普通双击只打开 */
+              onDoubleClick={event => onOpen(script, event.ctrlKey || event.metaKey)}
               onContextMenu={event => {
                 event.preventDefault();
 

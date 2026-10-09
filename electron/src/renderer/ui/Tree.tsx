@@ -12,7 +12,7 @@ interface TreeProps {
   filter: string;
   onToggle: (node: SchemaNode) => void;
   onSelect: (node: SchemaNode) => void;
-  onActivate: (node: SchemaNode) => void;
+  onActivate: (node: SchemaNode, run?: boolean) => void;
   onOpenData: (node: SchemaNode) => void;
   onDesign: (node: SchemaNode) => void;
   onCopyName: (node: SchemaNode) => void;
@@ -96,7 +96,7 @@ export function Tree(props: TreeProps) {
           className={`tree-row${activeId === node.id ? " is-active" : ""}`}
           /* 单击只选中，双击才展开 / 连接 / 打开数据（与 Navicat、DBeaver 一致） */
           onClick={() => onSelect(node)}
-          onDoubleClick={() => onActivate(node)}
+          onDoubleClick={event => onActivate(node, event.ctrlKey || event.metaKey)}
           onContextMenu={event => {
             event.preventDefault();
             onSelect(node);

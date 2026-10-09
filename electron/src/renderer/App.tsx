@@ -187,6 +187,8 @@ export function App() {
   const updateTabRef = useRef(updateTab);
   /* 自动化刚建的查询页：同一拍就要执行，React 状态还没落地，用这个同步映射兜住 */
   const automationTabsRef = useRef<Map<string, QueryTab>>(new Map());
+  /* 打开脚本后按需执行：执行域建好后回填，供对象页 / 对象树复用（Ctrl/Cmd 双击脚本） */
+  const runScriptRef = useRef<(tabId: string, sql: string, context?: QueryTab["path"]) => Promise<void>>(async () => undefined);
 
   connectionsRef.current = connections;
   openSessionsRef.current = openSessions;
@@ -332,7 +334,7 @@ export function App() {
     sessionOfNode, connectionOfNode, sessionByName,
     loadTableNodes, firstTableContainer, parentTreeNode, loadChildren, treeChildren,
     askText, askConfirm, setError, setStatus, setPending,
-    objectTargetRef, objectTabIdRef, resolveSql
+    objectTargetRef, objectTabIdRef, resolveSql, runScriptRef
   });
   objectApiRef.current = objects;
   const {
@@ -528,6 +530,7 @@ export function App() {
 
   const runQueryRef = useRef(runQuery);
   runQueryRef.current = runQuery;
+  runScriptRef.current = runQuery;
 
   /** 自动化用：按显式连接/库建一个查询页并返回 tabId */
   function openWorkspaceTab(options: { connection?: string; catalog?: string; schema?: string; title?: string; sql?: string }): string {
@@ -943,7 +946,7 @@ export function App() {
                 scriptFlash={scriptFlash}
                 scriptSelection={scriptSelection}
                 setScriptSelection={setScriptSelection}
-                onOpenScript={script => void openScriptFile(script)}
+                onOpenScript={(script, run) => void openScriptFile(script, run)}
                 onScriptContextMenu={script => void popupNativeMenu(buildScriptMenuEntries(script, menuContext))}
                 askConfirm={askConfirm}
                 onSaveDesign={(cols, indexes) => activeTab?.kind === "design" && void saveTableDesign(activeTab.id, activeTab.node, cols, indexes)}

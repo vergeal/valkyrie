@@ -55,7 +55,7 @@ export function ResultPane(props: {
   scriptFlash: number;
   scriptSelection: string[];
   setScriptSelection: (paths: string[]) => void;
-  onOpenScript: (script: ScriptFile) => void;
+  onOpenScript: (script: ScriptFile, run?: boolean) => void;
   onScriptContextMenu: (script: ScriptFile) => void;
   askConfirm: (message: string, title?: string, danger?: boolean) => Promise<boolean>;
   onSaveDesign: (columns: DesignColumn[], indexes: DesignIndex[]) => void;
@@ -275,7 +275,7 @@ export function ResultPane(props: {
               flashToken={scriptFlash}
               selectedPaths={scriptSelection}
               onSelectionChange={setScriptSelection}
-              onOpen={script => onOpenScript(script)}
+              onOpen={(script, run) => onOpenScript(script, run)}
               onContextMenu={script => onScriptContextMenu(script)}
             />
           </div>
