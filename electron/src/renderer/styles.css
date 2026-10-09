@@ -223,9 +223,11 @@ input, textarea, .console, .pre-wrap { user-select: text; }
 /*
  * macOS：窗口用系统红绿灯，自绘的三个按钮要藏起来，并在左侧给红绿灯让位；
  * 标题栏整体保持可拖动（-webkit-app-region: drag），按钮自身设成 no-drag。
+ * 红绿灯比 34px 标题栏的中线略低，给内容加一点上内边距把标题/logo 下移对齐
+ * （改下面的 padding-top 数值即可微调，越大越靠下）。
  */
 .app.is-mac .window-buttons { display: none; }
-.app.is-mac .titlebar { padding-left: 78px; }
+.app.is-mac .titlebar { padding-left: 78px; padding-top: var(--mac-titlebar-nudge, 4px); }
 
 .menubar {
   display: flex;
