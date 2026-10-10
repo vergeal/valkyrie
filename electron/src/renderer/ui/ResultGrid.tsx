@@ -696,16 +696,48 @@ export function ResultGrid(props: ResultGridProps) {
     const header = event.currentTarget.parentElement;
     const startWidth = header ? header.getBoundingClientRect().width : 120;
     const startX = event.clientX;
+    const wrap = wrapRef.current;
+    const startScrollLeft = wrap?.scrollLeft ?? 0;
+
+    let pointerX = startX;
+    let width = Math.round(startWidth);
+    let frame = 0;
+
+    /* 按住期间按帧处理：指针靠近容器左右边缘就横向滚动，并把滚动量计入宽度，
+       于是拉到超出可视范围时能自动往右划，继续把列拉宽。 */
+    const loop = () => {
+      const rect = wrap?.getBoundingClientRect();
+
+      if (wrap && rect) {
+        const EDGE = 24;
+        const STEP = 24;
+
+        if (pointerX > rect.right - EDGE)
+          wrap.scrollLeft += Math.min(STEP, Math.ceil((pointerX - (rect.right - EDGE)) / 2));
+        else if (pointerX < rect.left + EDGE)
+          wrap.scrollLeft -= Math.min(STEP, Math.ceil(((rect.left + EDGE) - pointerX) / 2));
+      }
+
+      const scrolled = (wrap?.scrollLeft ?? 0) - startScrollLeft;
+      const next = Math.max(MIN_COLUMN_WIDTH, startWidth + (pointerX - startX) + scrolled);
+      const rounded = Math.round(next);
+
+      if (rounded !== width) {
+        width = rounded;
+        setManualWidths(previous => ({ ...previous, [index]: rounded }));
+      }
+
+      frame = window.requestAnimationFrame(loop);
+    };
 
     const onMove = (moveEvent: MouseEvent) => {
-      /* 不设上限：宽度拉多宽就多宽，保证能完整看到长内容 */
-      const next = Math.max(MIN_COLUMN_WIDTH, startWidth + moveEvent.clientX - startX);
-      setManualWidths(previous => ({ ...previous, [index]: Math.round(next) }));
+      pointerX = moveEvent.clientX;
     };
 
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      window.cancelAnimationFrame(frame);
       document.body.classList.remove("is-resizing");
       document.body.style.cursor = "";
       lastResizeAt.current = Date.now();
@@ -715,6 +747,7 @@ export function ResultGrid(props: ResultGridProps) {
     document.body.style.cursor = "col-resize";
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    frame = window.requestAnimationFrame(loop);
   }
 
   function resetWidth(index: number) {
