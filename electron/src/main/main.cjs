@@ -8,6 +8,9 @@ const { JavaBridge } = require("./java-bridge.cjs");
 const { createSplash } = require("./splash.cjs");
 const { registerWindowControls, attachWindowState, disableBrowserShortcuts } = require("./window-controls.cjs");
 
+/* 应用名：开发模式（electron .）默认会显示成 Electron，这里统一成 Valkyrie（菜单 / Dock / 关于） */
+app.setName("Valkyrie");
+
 /* 防止用户重复启动导致起两份数据层进程，抢占同一份连接配置 */
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -700,6 +703,16 @@ app.on("second-instance", () => {
 app.whenReady().then(async () => {
   /* Windows 任务栏按这个 id 归组，图标 / 名称才会跟着应用走 */
   app.setAppUserModelId("com.changhong.valkyrie");
+
+  /* macOS 开发模式下 Dock 图标默认是 Electron 的，这里换成应用图标 */
+  if (process.platform === "darwin" && app.dock) {
+    const icon = nativeImage.createFromPath(appIconPath());
+
+    if (!icon.isEmpty())
+      app.dock.setIcon(icon);
+  }
+
+  app.setAboutPanelOptions({ applicationName: "Valkyrie", applicationVersion: app.getVersion() });
 
   /* 先把启动卡片立起来：数据层要起 JVM、读配置，这段时间用户得有反馈 */
   splash = createSplash();

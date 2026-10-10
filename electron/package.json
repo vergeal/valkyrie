@@ -1,5 +1,6 @@
 {
   "name": "valkyrie-desktop",
+  "productName": "Valkyrie",
   "version": "0.1.0",
   "private": true,
   "description": "Valkyrie 桌面客户端：Electron 界面 + Java 数据层",
