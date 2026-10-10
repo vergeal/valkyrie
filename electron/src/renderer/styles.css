@@ -1,10 +1,10 @@
 /*
  * 设计稿对应：浅色为默认观感（不跟随 Windows 深色模式），可在工具栏切换主题。
  *
- * 深色主题取 GitHub Primer「dark default」色板：
- * 画布 #0d1117 / 抬升面 #161b22 / 次级面 #21262d、
- * 边框 #30363d（次 #21262d）、正文 #e6edf3、次要文字 #8b949e、链接蓝 #58a6ff。
- * 状态色同样对齐 Primer：绿 #3fb950、黄 #d29922、红 #f85149、紫 #a371f7、青 #39c5cf。
+ * 深色主题对齐 IntelliJ New UI Dark：中性深灰而非近黑，长时间看更护眼。
+ * 画布 #1e1f22 / 面板·工具条 #2b2d30 / 次级面 #313335 / 边框 #393b40、
+ * 正文 #bcbec4、次要文字 #9da0a8、链接蓝 #548af7、选中 #2e436e。
+ * 状态色取 IntelliJ 那套：绿 #57965c、黄 #d9a343、红 #db5c5c、紫 #b18cf0、青 #56a8c2。
  */
 
 :root {
@@ -14,43 +14,43 @@
    * 浅色主题整体压柔：面板不用纯白（#fff 长时间看很刺眼），
    * 统一走带一点蓝灰的浅色，靠层级而不是靠"白"来区分区域。
    */
-  --bg: light-dark(#e7e9ee, #0d1117);
-  --chrome: light-dark(#eff0f4, #161b22);
-  --chrome-2: light-dark(#e9ebf0, #21262d);
-  --panel: light-dark(#f7f8fa, #0d1117);
+  --bg: light-dark(#e7e9ee, #1e1f22);
+  --chrome: light-dark(#eff0f4, #2b2d30);
+  --chrome-2: light-dark(#e9ebf0, #313335);
+  --panel: light-dark(#f7f8fa, #1e1f22);
   /* 浮层（菜单 / 下拉 / 弹窗）表面：深色下用抬升面，和画布拉开层级 */
-  --overlay: light-dark(#f7f8fa, #161b22);
+  --overlay: light-dark(#f7f8fa, #2b2d30);
   /* 框架条（标题栏 / 菜单栏 / 状态栏）：浅色沿用面板色，深色用抬升面 */
-  --bar: light-dark(#f7f8fa, #161b22);
+  --bar: light-dark(#f7f8fa, #2b2d30);
   /* 工具条 / 标签条：浅色是略深一点的框体色，深色同样用抬升面 */
-  --bar-2: light-dark(#e9ebf0, #161b22);
+  --bar-2: light-dark(#e9ebf0, #2b2d30);
   /* 数据库品牌 logo 在深色下提亮 / 加饱和，单色 logo 才不会糊在底上 */
   --logo-filter: none;
-  --field: light-dark(#fbfbfc, #0d1117);
-  --hover: light-dark(#e7eaef, #161b22);
-  --active: light-dark(#e3ecfa, #13233a);
-  --line: light-dark(#d8dde5, #30363d);
-  --line-soft: light-dark(#e5e8ee, #21262d);
-  --text: light-dark(#232936, #e6edf3);
-  --muted: light-dark(#6a7180, #8b949e);
-  --accent: light-dark(#2f6feb, #58a6ff);
-  --accent-soft: light-dark(#e1ebfa, #13233a);
+  --field: light-dark(#fbfbfc, #1e1f22);
+  --hover: light-dark(#e7eaef, #393b40);
+  --active: light-dark(#e3ecfa, #2e436e);
+  --line: light-dark(#d8dde5, #393b40);
+  --line-soft: light-dark(#e5e8ee, #313335);
+  --text: light-dark(#232936, #bcbec4);
+  --muted: light-dark(#6a7180, #9da0a8);
+  --accent: light-dark(#2f6feb, #548af7);
+  --accent-soft: light-dark(#e1ebfa, #2e436e);
   /* 数据表格：斑马纹 / 选中（对齐 Navicat 观感） */
-  --row-alt: light-dark(#f0f3f7, #161b22);
-  --row-selected: light-dark(#d3e3f8, #183051);
+  --row-alt: light-dark(#f0f3f7, #242528);
+  --row-selected: light-dark(#d3e3f8, #2e436e);
   /* 选中单元格（深蓝）/ 选中格所在整行（浅蓝） */
-  --cell-strong: light-dark(#9cc4f2, #17458c);
-  --cell-soft: light-dark(#e6f0fd, #13233a);
-  --row-dirty: light-dark(#f9f0dd, #2b2415);
+  --cell-strong: light-dark(#9cc4f2, #21427e);
+  --cell-soft: light-dark(#e6f0fd, #2b3648);
+  --row-dirty: light-dark(#f9f0dd, #3a3524);
   /* 网格线比常规分割线更淡，长时间看数据不刺眼 */
-  --grid-line: light-dark(#dbe1ea, #21262d);
-  --green: light-dark(#15803d, #3fb950);
+  --grid-line: light-dark(#dbe1ea, #313335);
+  --green: light-dark(#15803d, #57965c);
   /* 字符串字面量专用：比 --green 更柔和，深色下长时间看不刺眼 */
-  --string: light-dark(#12793c, #8ec198);
-  --amber: light-dark(#b45309, #d29922);
-  --red: light-dark(#b91c1c, #f85149);
-  --violet: light-dark(#6d28d9, #a371f7);
-  --cyan: light-dark(#0e7490, #39c5cf);
+  --string: light-dark(#12793c, #6a8759);
+  --amber: light-dark(#b45309, #d9a343);
+  --red: light-dark(#b91c1c, #db5c5c);
+  --violet: light-dark(#6d28d9, #b18cf0);
+  --cyan: light-dark(#0e7490, #56a8c2);
 
   /*
    * 图标语义色：界面里的图标按功能取鲜艳颜色（执行绿、删除红、数据蓝……），
@@ -530,7 +530,7 @@ input, textarea, .console, .pre-wrap { user-select: text; }
   filter: var(--logo-filter);
 }
 
-.app.is-dark { --logo-filter: brightness(1.35) saturate(1.12); }
+.app.is-dark { --logo-filter: brightness(1.15) saturate(1.06); }
 .tree-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 /* 明细叶子的补充说明：字段类型 / 索引字段 / 外键引用，靠右弱化显示 */
 .tree-detail {
@@ -1232,7 +1232,7 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
 
 .dtp-day.is-selected {
   background: var(--accent);
-  color: light-dark(#ffffff, #0d1117);
+  color: #ffffff;
   font-weight: 600;
 }
 
@@ -1745,6 +1745,12 @@ body.is-resizing * { cursor: inherit !important; }
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+
+/* 结果表容器为了 ⌘A / 粘贴需要可聚焦，但不需要焦点圈（否则会画系统强调色的黄框） */
+.grid-wrap:focus,
+.grid-wrap:focus-visible {
+  outline: none;
 }
 
 /* 结果表 / 表列表的右键菜单挂载点（Radix Trigger 需要一个真实元素） */
