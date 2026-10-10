@@ -81,6 +81,8 @@ export function App() {
   const [showInfo, setShowInfo] = useState(true);
   /* 编辑器当前（选区优先）是否为可分析的查询语句：决定工具栏「执行计划」是否可用 */
   const [editorCanExplain, setEditorCanExplain] = useState(false);
+  /* 结果表全选信号：Cmd/Ctrl+A 命中结果表时自增，结果表据此全选 */
+  const [gridSelectAllToken, setGridSelectAllToken] = useState(0);
 
   /* 客户端配置 / 主题 / Dialog / App 生命周期状态集中在各自 Hook 里 */
   const { settings, updateSettings } = useAppSettings();
@@ -692,7 +694,7 @@ export function App() {
     searchingGrid,
     loadingMore, loadMoreRows,
     resultActions, gridMenuEntries,
-    runResultAction, copyGridSelection
+    runResultAction, copyGridSelection, pasteGridSelection
   } = useResultGrid({
     currentResult,
     activeTab,
@@ -713,7 +715,25 @@ export function App() {
     runShortcutRef, formatShortcutRef, saveShortcutRef,
     runSelectionOrAll, formatActiveQuery, saveActiveScript,
     activeTab, editorRef, gridSelection, currentResult, copyGridSelection,
-    setTableSelection, setScriptSelection, setStatus, setOptionsOpen
+    setTableSelection, setScriptSelection, setStatus, setOptionsOpen,
+    onSelectAllGrid: () => {
+      const focused = document.activeElement as HTMLElement | null;
+
+      if (!focused?.closest?.(".grid-wrap"))
+        return false;
+
+      setGridSelectAllToken(previous => previous + 1);
+      return true;
+    },
+    onPasteGrid: () => {
+      const focused = document.activeElement as HTMLElement | null;
+
+      if (!focused?.closest?.(".grid-wrap"))
+        return false;
+
+      void pasteGridSelection();
+      return true;
+    }
   });
 
   /* 对象列是整页列表：结果集那一套面板（消息 / 执行计划 / 日志）在这里不出现 */
@@ -989,6 +1009,7 @@ export function App() {
                 logs={activeTab?.logs ?? []}
                 setLogs={records => activeTab && updateTab(activeTab.id, { logs: records })}
                 copyText={copyText}
+                selectAllToken={gridSelectAllToken}
               />
             </Panel>
           </Group>

@@ -224,6 +224,8 @@ declare global {
       onShortcut?: (callback: (action: string) => void) => () => void;
       /** 写系统剪贴板（走主进程，避免 navigator.clipboard 的聚焦 / 用户激活限制） */
       writeClipboard?: (text: string) => Promise<boolean>;
+      /** 读系统剪贴板文本（结果表批量粘贴） */
+      readClipboard?: () => Promise<string>;
       chooseSavePath?: (options: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
       chooseOpenPath?: (options: { title?: string; defaultPath?: string; directory?: boolean; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
       revealPath?: (target: string) => Promise<boolean>;
@@ -303,6 +305,17 @@ export function writeClipboard(text: string): Promise<boolean> {
     return navigator.clipboard.writeText(text).then(() => true).catch(() => false);
 
   return Promise.resolve(false);
+}
+
+/** 读系统剪贴板文本（优先走主进程，回退浏览器 API） */
+export function readClipboard(): Promise<string> {
+  if (window.valkyrie?.readClipboard)
+    return window.valkyrie.readClipboard();
+
+  if (navigator.clipboard?.readText)
+    return navigator.clipboard.readText().catch(() => "");
+
+  return Promise.resolve("");
 }
 
 export function chooseSavePath(options: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null> {

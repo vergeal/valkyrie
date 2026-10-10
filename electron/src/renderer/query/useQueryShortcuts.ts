@@ -30,6 +30,10 @@ export interface QueryShortcutsDeps {
   setScriptSelection: (paths: string[]) => void;
   setStatus: (message: string) => void;
   setOptionsOpen: (open: boolean) => void;
+  /** 全选：结果表获得焦点时全选表格，返回 true 表示已处理 */
+  onSelectAllGrid?: () => boolean;
+  /** 粘贴：结果表获得焦点时把剪贴板内容批量写入，返回 true 表示已处理 */
+  onPasteGrid?: () => boolean;
 }
 
 /**
@@ -41,7 +45,7 @@ export function useQueryShortcuts(deps: QueryShortcutsDeps) {
     runShortcutRef, formatShortcutRef, saveShortcutRef,
     runSelectionOrAll, formatActiveQuery, saveActiveScript,
     activeTab, editorRef, gridSelection, currentResult, copyGridSelection,
-    setTableSelection, setScriptSelection, setStatus, setOptionsOpen
+    setTableSelection, setScriptSelection, setStatus, setOptionsOpen, onSelectAllGrid, onPasteGrid
   } = deps;
 
   runShortcutRef.current = () => void runSelectionOrAll();
@@ -59,6 +63,10 @@ export function useQueryShortcuts(deps: QueryShortcutsDeps) {
       (focused as HTMLInputElement).select();
       return;
     }
+
+    /* 结果表获得焦点：Cmd/Ctrl+A 全选表格（否则落回编辑器全文） */
+    if (onSelectAllGrid?.())
+      return;
 
     if (activeTab?.kind === "objects" && activeTab.view === "tables" && activeTab.tables.length > 0) {
       setTableSelection(activeTab.tables.map(node => node.label));
@@ -153,6 +161,14 @@ export function useQueryShortcuts(deps: QueryShortcutsDeps) {
       /* Ctrl+C / Ctrl+Insert：结果表有选区就复制成「制表符分隔」，粘到 Excel 直接分格 */
       if (!shift && (key === "c" || key === "insert")) {
         if (!target?.closest?.("input, textarea") && gridCopyRef.current())
+          event.preventDefault();
+
+        return;
+      }
+
+      /* Ctrl+V：结果表获得焦点时批量粘贴（输入框 / 编辑器交给系统默认粘贴） */
+      if (!shift && key === "v") {
+        if (!target?.closest?.("input, textarea") && onPasteGrid?.())
           event.preventDefault();
 
         return;

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { invoke, messageOf, type QueryColumn, type QueryResultPayload } from "../api";
+import { invoke, messageOf, readClipboard, type QueryColumn, type QueryResultPayload } from "../api";
 import type { WorkTab } from "../app/appTypes";
 import type { MenuEntry } from "../ui/Menu";
 import {
   gridSelectionToTsv,
+  parseClipboardGrid,
   resolveDirtyRows,
   rowToJson,
   selectionCols,
@@ -90,6 +91,76 @@ export function useResultGrid(options: UseResultGridOptions) {
     await copyText(gridSelectionToTsv(gridSelection, currentResult));
   }
 
+  /*
+   * 粘贴结果表选区：读剪贴板（制表符分隔）。
+   * - 选中多个单元格时：把剪贴板内容按块「平铺」填满整个选区（单个值就填满，
+   *   一整行就逐行重复），像 Excel 一样；
+   * - 只选中一个单元格时：从该单元格起按块写入（块可能比单元格大）。
+   * 全部进「未提交缓冲」，不越界；只读结果不处理。
+   */
+  async function pasteGridSelection() {
+    if (!activeTab || !("result" in activeTab) || !activeTab.result?.jobId)
+      return;
+
+    const result = activeTab.result;
+
+    if (!result.editable)
+      return;
+
+    const grid = parseClipboardGrid(await readClipboard());
+
+    if (grid.length === 0)
+      return;
+
+    const totalRows = result.rows?.length ?? 0;
+    const totalCols = result.columns?.length ?? 0;
+    const selection = gridSelection;
+    const multiCell = selection != null && (selection.r2 > selection.r1 || selection.c2 > selection.c1);
+    const cells: { row: number; col: number; value: string }[] = [];
+
+    if (selection && multiCell) {
+      /* 平铺填满选区 */
+      const blockRows = grid.length;
+      const rowEnd = Math.min(selection.r2, totalRows - 1);
+      const colEnd = Math.min(selection.c2, totalCols - 1);
+
+      for (let row = selection.r1; row <= rowEnd; row++) {
+        const blockRow = grid[(row - selection.r1) % blockRows];
+
+        if (blockRow.length === 0)
+          continue;
+
+        for (let col = selection.c1; col <= colEnd; col++)
+          cells.push({ row, col, value: blockRow[(col - selection.c1) % blockRow.length] });
+      }
+    } else {
+      /* 单格：按块写入 */
+      const anchorRow = selection?.r1 ?? 0;
+      const anchorCol = selection?.c1 ?? 0;
+
+      for (let r = 0; r < grid.length; r++) {
+        const row = anchorRow + r;
+
+        if (row >= totalRows)
+          break;
+
+        for (let c = 0; c < grid[r].length; c++) {
+          const col = anchorCol + c;
+
+          if (col >= totalCols)
+            break;
+
+          cells.push({ row, col, value: grid[r][c] });
+        }
+      }
+    }
+
+    if (cells.length === 0)
+      return;
+
+    await runResultAction("result.updateMany", { cells }, `已粘贴 ${cells.length} 个单元格（未提交）`);
+  }
+
   /** 本次未提交的改动条数（下拉 / 提示文案共用） */
   function pendingChangeCount(): number {
     return activeTab && "pending" in activeTab ? activeTab.pending ?? 0 : 0;
@@ -134,14 +205,17 @@ export function useResultGrid(options: UseResultGridOptions) {
 
       /* 累计/清零本次未提交的改动条数 */
       const rowParams = Array.isArray(params.rows) ? params.rows.length : 0;
+      const cellParams = Array.isArray(params.cells) ? params.cells.length : 0;
       const replaced = typeof payload.replaced === "number" ? payload.replaced : 0;
       const delta = method === "result.update" || method === "result.insert"
         ? 1
-        : method === "result.delete" || method === "result.setNull"
-          ? rowParams
-          : method === "result.replace"
-            ? replaced
-            : 0;
+        : method === "result.updateMany"
+          ? cellParams
+          : method === "result.delete" || method === "result.setNull"
+            ? rowParams
+            : method === "result.replace"
+              ? replaced
+              : 0;
       const clearsPending = method === "result.commit" || method === "result.rollback" || method === "result.reload";
 
       updateTab(tabId, {
@@ -424,6 +498,7 @@ export function useResultGrid(options: UseResultGridOptions) {
   /* 结果表右键菜单（Radix ContextMenu 负责弹出/定位/关闭） */
   const gridMenuEntries: MenuEntry[] = [
     { label: resultActions.copy.label, icon: "copy", disabled: resultActions.copy.disabled, action: resultActions.copy.run },
+    { label: "粘贴", icon: "copy", disabled: !currentResult?.editable, action: () => void pasteGridSelection() },
     { separator: true },
     { label: resultActions.commit.label, disabled: resultActions.commit.disabled, action: resultActions.commit.run },
     { label: resultActions.insert.label, disabled: resultActions.insert.disabled, action: resultActions.insert.run },
@@ -457,6 +532,6 @@ export function useResultGrid(options: UseResultGridOptions) {
     searchingGrid,
     loadingMore, loadMoreRows,
     resultActions, gridMenuEntries,
-    runResultAction, copyGridSelection
+    runResultAction, copyGridSelection, pasteGridSelection
   };
 }

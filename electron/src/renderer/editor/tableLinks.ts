@@ -1,4 +1,5 @@
 import * as monaco from "./monaco";
+import { collectTableRefs } from "./sqlTableRefs";
 
 const SCHEME = "valkyrie-table";
 
@@ -22,26 +23,16 @@ export function registerTableLinks(options: TableLinkOptions): monaco.IDisposabl
       if (!names || names.size === 0)
         return { links: [] };
 
-      const links: monaco.languages.ILink[] = [];
-      const text = model.getValue();
-      const pattern = /[A-Za-z_][\w$]*/g;
-      let match: RegExpExecArray | null;
+      const links: monaco.languages.ILink[] = collectTableRefs(model.getValue(), names).map(ref => {
+        const start = model.getPositionAt(ref.start);
+        const end = model.getPositionAt(ref.end);
 
-      while ((match = pattern.exec(text)) !== null) {
-        const word = match[0];
-
-        if (!names.has(word.toLowerCase()))
-          continue;
-
-        const start = model.getPositionAt(match.index);
-        const end = model.getPositionAt(match.index + word.length);
-
-        links.push({
+        return {
           range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
-          url: monaco.Uri.parse(`${SCHEME}://open/${encodeURIComponent(word)}`),
-          tooltip: `打开表 ${word}`
-        });
-      }
+          url: monaco.Uri.parse(`${SCHEME}://open/${encodeURIComponent(ref.word)}`),
+          tooltip: `打开表 ${ref.word}`
+        };
+      });
 
       return { links };
     }

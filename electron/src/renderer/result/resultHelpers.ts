@@ -29,6 +29,20 @@ export const selectionCols = (selection: GridSelection) =>
     : Array.from({ length: selection.c2 - selection.c1 + 1 }, (_, index) => selection.c1 + index);
 
 /**
+ * 解析剪贴板文本为二维数组：从 Excel / WPS / 结果表复制出来的是
+ * 「制表符分隔、换行分行」。空内容返回空数组。
+ */
+export function parseClipboardGrid(text: string): string[][] {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const trimmed = normalized.endsWith("\n") ? normalized.slice(0, -1) : normalized;
+
+  if (!trimmed)
+    return [];
+
+  return trimmed.split("\n").map(line => line.split("\t"));
+}
+
+/**
  * 全表搜索的行匹配：忽略大小写、纯子串（与 ResultGrid 内的过滤规则同源）。
  * keyword 传进来前会 trim + 小写。
  */

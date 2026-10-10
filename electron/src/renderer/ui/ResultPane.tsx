@@ -64,6 +64,8 @@ export function ResultPane(props: {
   logs: LogRecord[];
   setLogs: (records: LogRecord[]) => void;
   copyText: (text: string) => void;
+  /** 变化即触发结果表全选（Cmd/Ctrl+A 由外层转发） */
+  selectAllToken?: number;
 }) {
   const {
     tabsEmpty, pageTab, resultPane, setResultPane, activeTab, rows, columns, lastCost,
@@ -73,7 +75,7 @@ export function ResultPane(props: {
     setGridHits, setGridSelection, onCellCommit, onExport, onExplain, onGridContextMenu,
     tableFilter, listFlash, tableSelection, setTableSelection, setActiveNode, onOpenTable, onTableContextMenu,
     scriptFilter, scriptFlash, scriptSelection, setScriptSelection, onOpenScript, onScriptContextMenu,
-    askConfirm, onSaveDesign, onReloadDesign, onApplyDdl, logs, setLogs, copyText
+    askConfirm, onSaveDesign, onReloadDesign, onApplyDdl, logs, setLogs, copyText, selectAllToken
   } = props;
 
   return (
@@ -318,6 +320,7 @@ export function ResultPane(props: {
               onSearchHitsChange={setGridHits}
               onCellCommit={onCellCommit}
               onSelectionChange={setGridSelection}
+              selectAllToken={selectAllToken}
             />
           </div>
         )}

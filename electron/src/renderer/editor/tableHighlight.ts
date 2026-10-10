@@ -1,4 +1,5 @@
 import * as monaco from "./monaco";
+import { collectTableRefs } from "./sqlTableRefs";
 
 export interface TableHighlightOptions {
   /** 当前表名集合（小写） */
@@ -30,23 +31,16 @@ export function registerTableHighlight(
       return;
     }
 
-    const text = model.getValue();
-    const pattern = /[A-Za-z_][\w$]*/g;
-    const ranges: monaco.editor.IModelDeltaDecoration[] = [];
-    let match: RegExpExecArray | null;
+    const refs = collectTableRefs(model.getValue(), names);
+    const ranges: monaco.editor.IModelDeltaDecoration[] = refs.map(ref => {
+      const start = model.getPositionAt(ref.start);
+      const end = model.getPositionAt(ref.end);
 
-    while ((match = pattern.exec(text)) !== null) {
-      if (!names.has(match[0].toLowerCase()))
-        continue;
-
-      const start = model.getPositionAt(match.index);
-      const end = model.getPositionAt(match.index + match[0].length);
-
-      ranges.push({
+      return {
         range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
         options: { inlineClassName: "editor-table-ref" }
-      });
-    }
+      };
+    });
 
     decorations.set(ranges);
   };

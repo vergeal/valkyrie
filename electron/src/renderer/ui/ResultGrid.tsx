@@ -47,6 +47,8 @@ interface ResultGridProps {
     /** 选区里真正可见（未被搜索过滤掉）的行 / 列下标 */
     rowList: number[]; colList: number[];
   } | null) => void;
+  /** 变化即触发「全选表格」（Cmd/Ctrl+A 由外层转发） */
+  selectAllToken?: number;
 }
 
 /* 与 styles.css 里 table.grid 的字体保持一致：从 --grid-font 读，改字体后列宽才量得准 */
@@ -231,7 +233,7 @@ function measureColumns(columns: QueryColumn[], rows: (string | null)[][], fontS
 export function ResultGrid(props: ResultGridProps) {
   const {
     columns, rows, flashToken = 0, fontSize = 14, offset = 0, editable = false, dirtyRows = [], deletedRows = [],
-    search = "", showTypes = true, onSearchHitsChange, onCellCommit, onSelectionChange, onContextMenu
+    search = "", showTypes = true, onSearchHitsChange, onCellCommit, onSelectionChange, onContextMenu, selectAllToken = 0
   } = props;
   const [anchor, setAnchor] = useState<CellRef | null>(null);
   const [focus, setFocus] = useState<CellRef | null>(null);
@@ -274,6 +276,12 @@ export function ResultGrid(props: ResultGridProps) {
   const bubbleRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const dragging = useRef(false);
+  /* 当前拖选模式：自动滚动循环里读取，避免拿到旧闭包 */
+  const dragMode = useRef<"cell" | "row" | "col">("cell");
+  /* 拖选到边缘时的自动滚动：指针位置 + rAF 句柄 + 每帧的推进函数 */
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
+  const autoScrollFrame = useRef(0);
+  const autoScrollStep = useRef<() => boolean>(() => false);
   /* 防止 blur 与主动提交重复触发 */
   const committing = useRef(false);
   /* 刚拖过列宽时忽略随后的 click，避免误触发"选中整列" */
@@ -437,9 +445,49 @@ export function ResultGrid(props: ResultGridProps) {
   }
 
   useEffect(() => {
-    const stop = () => { dragging.current = false; };
-    window.addEventListener("mouseup", stop);
-    return () => window.removeEventListener("mouseup", stop);
+    /* 拖选到边缘时按帧自动滚动并同步焦点，鼠标松开即停 */
+    const run = () => {
+      autoScrollFrame.current = 0;
+
+      if (!dragging.current)
+        return;
+
+      if (autoScrollStep.current() && dragging.current)
+        autoScrollFrame.current = window.requestAnimationFrame(run);
+    };
+
+    const onMove = (event: MouseEvent) => {
+      if (!dragging.current)
+        return;
+
+      pointerRef.current = { x: event.clientX, y: event.clientY };
+
+      if (!autoScrollFrame.current)
+        autoScrollFrame.current = window.requestAnimationFrame(run);
+    };
+
+    const onUp = () => {
+      dragging.current = false;
+      pointerRef.current = null;
+
+      if (autoScrollFrame.current) {
+        window.cancelAnimationFrame(autoScrollFrame.current);
+        autoScrollFrame.current = 0;
+      }
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+
+      if (autoScrollFrame.current) {
+        window.cancelAnimationFrame(autoScrollFrame.current);
+        autoScrollFrame.current = 0;
+      }
+    };
   }, []);
 
   /* 列变了（换了结果集）→ 丢掉旧的手动宽度 + 重算自适应宽度 */
@@ -505,6 +553,65 @@ export function ResultGrid(props: ResultGridProps) {
   const firstRenderedIndex = renderedRows[0]?.index;
 
   /*
+   * 每帧推进：指针靠近（或越过）滚动容器上下 / 左右边缘时滚动，并按几何位置把焦点
+   * 移到指针下的单元格。返回是否滚动（没滚动就让循环停下，焦点交给单元格 onMouseEnter）。
+   */
+  autoScrollStep.current = () => {
+    const wrap = wrapRef.current;
+    const pointer = pointerRef.current;
+
+    if (!wrap || !pointer || visibleRows.length === 0)
+      return false;
+
+    const rect = wrap.getBoundingClientRect();
+    const EDGE = 28;
+    const MAX_STEP = 22;
+    let dx = 0;
+    let dy = 0;
+
+    if (pointer.y < rect.top + EDGE)
+      dy = -Math.ceil(((rect.top + EDGE - pointer.y) / EDGE) * MAX_STEP);
+    else if (pointer.y > rect.bottom - EDGE)
+      dy = Math.ceil(((pointer.y - (rect.bottom - EDGE)) / EDGE) * MAX_STEP);
+
+    if (pointer.x < rect.left + EDGE)
+      dx = -Math.ceil(((rect.left + EDGE - pointer.x) / EDGE) * MAX_STEP);
+    else if (pointer.x > rect.right - EDGE)
+      dx = Math.ceil(((pointer.x - (rect.right - EDGE)) / EDGE) * MAX_STEP);
+
+    if (!dx && !dy)
+      return false;
+
+    if (dy)
+      wrap.scrollTop += dy;
+
+    if (dx)
+      wrap.scrollLeft += dx;
+
+    /* 指针落在哪一行（行高统一，用几何算，避免落在占位区时 elementFromPoint 拿不到行） */
+    const headHeight = wrap.querySelector("thead")?.getBoundingClientRect().height ?? 0;
+    const rowAtPointer = Math.floor((wrap.scrollTop + (pointer.y - rect.top) - headHeight) / effectiveRowHeight);
+    const clamped = Math.max(0, Math.min(visibleRows.length - 1, rowAtPointer));
+    const targetRow = visibleRows[clamped]?.index;
+    const colEl = (document.elementFromPoint(pointer.x, pointer.y) as HTMLElement | null)?.closest?.("[data-col]") as HTMLElement | null;
+    const targetCol = colEl?.dataset.col != null ? Number(colEl.dataset.col) : undefined;
+
+    if (dragMode.current === "row") {
+      if (targetRow != null)
+        setFocus(previous => ({ row: targetRow, col: previous?.col ?? 0 }));
+    } else if (dragMode.current === "col") {
+      if (targetCol != null)
+        setFocus(previous => ({ row: previous?.row ?? 0, col: targetCol }));
+    } else if (targetRow != null && targetCol != null) {
+      setFocus({ row: targetRow, col: targetCol });
+    } else if (targetRow != null) {
+      setFocus(previous => ({ row: targetRow, col: previous?.col ?? 0 }));
+    }
+
+    return true;
+  };
+
+  /*
    * 选区范围：
    * - 行号列（#）起拖 → 整行选中（列范围全宽）
    * - 列头起拖 → 整列选中（行范围全高）
@@ -567,6 +674,13 @@ export function ResultGrid(props: ResultGridProps) {
     /* 过滤条件变了，可见行也跟着变 */
     keyword, visibleRows.length
   ]);
+
+  /* Cmd/Ctrl+A（外层转发）：token 变化即全选整个结果集 */
+  useEffect(() => {
+    if (selectAllToken)
+      selectAllCells();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectAllToken]);
 
   const columnStyle = (index: number) => {
     const width = manualWidths[index] ?? autoWidths[index];
@@ -715,11 +829,24 @@ export function ResultGrid(props: ResultGridProps) {
     if (editing)
       commitEdit();
 
+    /*
+     * Shift + 点击：保留原锚点，只把焦点移到点击处（等同于继续框选/扩选），
+     * 模式不变，这样整行 / 整列 / 矩形选区都能连续扩大。
+     */
+    if (event.shiftKey && anchor) {
+      setFocus(cell);
+      wrapRef.current?.focus?.({ preventScroll: true });
+      return;
+    }
+
     dragging.current = true;
+    dragMode.current = mode;
     setRowMode(mode === "row");
     setColMode(mode === "col");
     setAnchor(cell);
     setFocus(cell);
+    /* 让容器拿到焦点：Cmd/Ctrl+A 时据此判断「全选表格」还是「全选编辑器文本」 */
+    wrapRef.current?.focus?.({ preventScroll: true });
   }
 
   /**
@@ -741,7 +868,19 @@ export function ResultGrid(props: ResultGridProps) {
 
     /* 不从左上角拉框：拖拽扩展交给行号列本身 */
     dragging.current = false;
+    dragMode.current = "row";
     setRowMode(true);
+    setColMode(false);
+    setAnchor({ row: 0, col: 0 });
+    setFocus({ row: Math.max(0, rows.length - 1), col: Math.max(0, columns.length - 1) });
+    wrapRef.current?.focus?.({ preventScroll: true });
+  }
+
+  /** 全选所有单元格（Cmd/Ctrl+A）：矩形选区覆盖整个结果集 */
+  function selectAllCells() {
+    dragging.current = false;
+    dragMode.current = "cell";
+    setRowMode(false);
     setColMode(false);
     setAnchor({ row: 0, col: 0 });
     setFocus({ row: Math.max(0, rows.length - 1), col: Math.max(0, columns.length - 1) });
@@ -754,6 +893,7 @@ export function ResultGrid(props: ResultGridProps) {
     <div
       className="grid-wrap"
       ref={wrapRef}
+      tabIndex={-1}
       onScroll={event => {
         /* 一帧只跟一次：滚动过程中连续 setState 会拖慢滚动 */
         const top = event.currentTarget.scrollTop;
@@ -778,6 +918,7 @@ export function ResultGrid(props: ResultGridProps) {
                 ].filter(Boolean).join(" ") || undefined}
                 style={columnStyle(index)}
                 title={`${column.label} · ${column.type}`}
+                data-col={index}
                 onMouseDown={event => {
                   if (Date.now() - lastResizeAt.current < 250)
                     return;
@@ -882,6 +1023,8 @@ export function ResultGrid(props: ResultGridProps) {
                       key={cellIndex}
                       className={classes || undefined}
                       style={columnStyle(cellIndex)}
+                      data-row={rowIndex}
+                      data-col={cellIndex}
                       onMouseDown={event => startSelection(event, { row: rowIndex, col: cellIndex })}
                       onMouseEnter={() => {
                         if (dragging.current)

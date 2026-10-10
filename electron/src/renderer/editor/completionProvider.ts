@@ -34,6 +34,25 @@ export function completionKind(kind: string): monaco.languages.CompletionItemKin
  * 上下文通过 getContext 每次实时读取（避免闭包在旧状态上）。
  */
 export function registerCompletionProvider(getContext: () => SuggestionContext): monaco.IDisposable {
+  /*
+   * 同一上下文上一次成功的结果：数据层偶发失败（引擎构建、连接池瞬时占用等）时，
+   * 用它兜底，避免智能提示整个消失。
+   */
+  let cachedKey = "";
+  let cachedItems: SuggestionItem[] = [];
+
+  const toSuggestions = (items: SuggestionItem[], range: monaco.Range) => items.map(item => ({
+    label: item.label,
+    kind: completionKind(item.kind),
+    detail: item.detail || undefined,
+    insertText: item.insertText ?? item.label,
+    /* 片段交给 Monaco 展开 ${1:...} 占位符 */
+    insertTextRules: item.kind === "Snippet"
+      ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+      : undefined,
+    range
+  }));
+
   return monaco.languages.registerCompletionItemProvider("sql", {
     /* 只在「.」后主动弹出（表别名.字段）；正常单词输入由 quickSuggestions 触发，空格不再触发 */
     triggerCharacters: ["."],
@@ -46,6 +65,7 @@ export function registerCompletionProvider(getContext: () => SuggestionContext):
 
       const word = model.getWordUntilPosition(position);
       const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
+      const key = [context.sessionId ?? "", context.connection ?? "", context.catalog ?? "", context.schema ?? ""].join("|");
 
       try {
         const payload = await invoke<{ suggestions: SuggestionItem[] }>("sql.suggest", {
@@ -58,21 +78,13 @@ export function registerCompletionProvider(getContext: () => SuggestionContext):
           offset: model.getOffsetAt(position)
         });
 
-        return {
-          suggestions: (payload.suggestions ?? []).map(item => ({
-            label: item.label,
-            kind: completionKind(item.kind),
-            detail: item.detail || undefined,
-            insertText: item.insertText ?? item.label,
-            /* 片段交给 Monaco 展开 ${1:...} 占位符 */
-            insertTextRules: item.kind === "Snippet"
-              ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
-              : undefined,
-            range
-          }))
-        };
+        cachedKey = key;
+        cachedItems = payload.suggestions ?? [];
+
+        return { suggestions: toSuggestions(cachedItems, range) };
       } catch {
-        return { suggestions: [] };
+        /* 失败时回退到同上下文上次成功的结果 */
+        return { suggestions: key === cachedKey ? toSuggestions(cachedItems, range) : [] };
       }
     }
   });

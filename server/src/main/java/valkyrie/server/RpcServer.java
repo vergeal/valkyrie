@@ -177,6 +177,7 @@ public class RpcServer
                         case "sql.suggest" -> suggestSql(params);
                         case "sql.warmSuggest" -> warmSuggest(params);
                         case "result.update" -> updateCell(params);
+                        case "result.updateMany" -> updateCells(params);
                         case "result.insert" -> insertRow(params);
                         case "result.delete" -> deleteRows(params);
                         case "result.setNull" -> setNull(params);
@@ -318,8 +319,14 @@ public class RpcServer
                 SuggestionEngine engine = suggestionEngines.get(cacheKey);
 
                 if (engine == null) {
-                        engine = SuggestionEngine.of(session.driver, context);
-                        suggestionEngines.put(cacheKey, engine);
+                        try {
+                                engine = SuggestionEngine.of(session.driver, context);
+                                suggestionEngines.put(cacheKey, engine);
+                        } catch (Exception e) {
+                                /* 预热失败无所谓：真正补全时会再试一次并降级为关键字 */
+                                LOG.warn("预热补全引擎失败: {}", e.getMessage());
+                                return new JSONObject();
+                        }
                 }
 
                 suggestionSnapshots.put(snapshotKey(session.name, context), engine);
@@ -1076,16 +1083,29 @@ public class RpcServer
 
                 if (session != null) {
                         String cacheKey = session.id + "|" + context.catalog() + "|" + context.schema();
+                        boolean cacheable = true;
 
                         engine = suggestionEngines.get(cacheKey);
 
                         if (engine == null) {
-                                engine = SuggestionEngine.of(session.driver, context);
-                                suggestionEngines.put(cacheKey, engine);
+                                /*
+                                 * 构建要读元数据，偶发（连接池瞬时占用、驱动报错）会抛异常；
+                                 * 不能让整条补全请求跟着失败，退化为该方言关键字，并且不缓存
+                                 * 这份降级结果，下次仍会尝试重建。
+                                 */
+                                try {
+                                        engine = SuggestionEngine.of(session.driver, context);
+                                        suggestionEngines.put(cacheKey, engine);
+                                } catch (Exception e) {
+                                        LOG.warn("补全引擎构建失败，本次退化为关键字: {}", e.getMessage());
+                                        engine = SuggestionEngine.keywords(type);
+                                        cacheable = false;
+                                }
                         }
 
                         /* 同步留一份「连接级」快照：连接关闭后查询控制台靠它继续提示 */
-                        suggestionSnapshots.put(snapshotKey(session.name, context), engine);
+                        if (cacheable)
+                                suggestionSnapshots.put(snapshotKey(session.name, context), engine);
                 } else if (connection != null) {
                         engine = suggestionSnapshots.get(snapshotKey(connection, context));
                 }
@@ -1097,7 +1117,16 @@ public class RpcServer
                         engine = suggestionEngines.computeIfAbsent(cacheKey, key -> SuggestionEngine.keywords(type));
                 }
 
-                for (Suggestion suggestion : engine.resolve(sql, offset)) {
+                List<Suggestion> resolved;
+
+                try {
+                        resolved = engine.resolve(sql, offset);
+                } catch (Exception e) {
+                        LOG.warn("补全解析失败: {}", e.getMessage());
+                        resolved = new ArrayList<>();
+                }
+
+                for (Suggestion suggestion : resolved) {
                         JSONObject json = new JSONObject();
                         json.put("label", suggestion.getLabel());
                         json.put("kind", suggestion.getKind());
@@ -1476,6 +1505,33 @@ public class RpcServer
                         params.containsKey("value") ? params.getString("value") : null);
 
                 return resultDelta(params.getLongValue("jobId"), result, changedRows(result, row));
+        }
+
+        /**
+         * 批量修改单元格（结果表粘贴）：一次请求写入多个 {row,col,value}，
+         * 都进未提交缓冲，返回受影响行的增量。
+         */
+        private Object updateCells(JSONObject params)
+        {
+                QueryResult result = requireResult(params);
+                JSONArray cells = params.getJSONArray("cells");
+                java.util.LinkedHashSet<Integer> rows = new java.util.LinkedHashSet<>();
+
+                if (cells != null) {
+                        for (int i = 0; i < cells.size(); i++) {
+                                JSONObject cell = cells.getJSONObject(i);
+                                int row = cell.getIntValue("row");
+
+                                result.addUpdateRow(
+                                        cell.getIntValue("col"),
+                                        row,
+                                        cell.containsKey("value") ? cell.getString("value") : null);
+                                rows.add(row);
+                        }
+                }
+
+                return resultDelta(params.getLongValue("jobId"), result,
+                        changedRows(result, rows.stream().mapToInt(Integer::intValue).toArray()));
         }
 
         private Object setNull(JSONObject params)

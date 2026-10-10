@@ -194,8 +194,8 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
     });
 
     /*
-     * 观测文本改动：插进来的空白（Tab 或空格键，位置不限）→ 画成蓝块；
-     * 其它改动（打字、粘贴、输入法、撤销、删除）→ 收掉蓝块。
+     * 观测文本改动：行首插进来的空白（Tab 或空格，行前面还没有任何字符）→ 画成绿块；
+     * 行中间（前面已有字符）的空白不标，其它改动（打字、粘贴、输入法、撤销、删除）→ 收掉绿块。
      */
     editor.onDidChangeModelContent(event => {
       const model = editor.getModel();
@@ -214,6 +214,15 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
       const atEnd = selection != null && selection.isEmpty() && model.getOffsetAt(selection.getEndPosition()) === end;
 
       if (onlyWhitespace && atEnd) {
+        /* 只在行首缩进时标块：插入点前面必须全是空白（含空行 / 纯缩进行） */
+        const startPosition = model.getPositionAt(start);
+        const linePrefix = model.getLineContent(startPosition.lineNumber).slice(0, startPosition.column - 1);
+
+        if (linePrefix.trim() !== "") {
+          clearIndentMark();
+          return;
+        }
+
         /* 挨着上次的块继续敲就并进去，否则新起一块 */
         const anchor = indentMark && indentMark.end === start ? indentMark.anchor : start;
 

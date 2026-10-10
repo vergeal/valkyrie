@@ -470,6 +470,9 @@ function registerIpc() {
     return true;
   });
 
+  /* 读系统剪贴板文本（结果表批量粘贴走主进程，比 navigator.clipboard 可靠） */
+  ipcMain.handle("valkyrie:read-clipboard", () => clipboard.readText());
+
   /* 导出另存为：由主进程弹系统对话框，返回用户选择的路径 */
   ipcMain.handle("valkyrie:choose-save-path", async (event, options) => {
     const owner = BrowserWindow.fromWebContents(event.sender);
