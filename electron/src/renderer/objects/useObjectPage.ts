@@ -562,7 +562,12 @@ export function useObjectPage(deps: UseObjectPageDeps) {
   async function showScriptList(
     options: { force?: boolean; highlightName?: string; source?: SchemaNode; session?: SessionState | null; activate?: boolean } = {}
   ) {
-    const owner = options.session ?? (options.source ? sessionOfNode(options.source) : sessionRef.current);
+    /*
+     * 会话来源：显式传入 > 脚本节点所属连接 > 活动会话。
+     * 脚本节点有时解析不出所属连接（树刚刷新 / 节点未挂到连接），
+     * 这时要回退到活动会话，否则会直接报错、对象页都建不出来。
+     */
+    const owner = options.session ?? (options.source ? sessionOfNode(options.source) : null) ?? sessionRef.current;
 
     if (!owner) {
       setError("请先在左侧选择一个连接");

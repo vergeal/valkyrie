@@ -698,7 +698,8 @@ export function ResultGrid(props: ResultGridProps) {
     const startX = event.clientX;
 
     const onMove = (moveEvent: MouseEvent) => {
-      const next = Math.max(60, Math.min(640, startWidth + moveEvent.clientX - startX));
+      /* 不设上限：宽度拉多宽就多宽，保证能完整看到长内容 */
+      const next = Math.max(MIN_COLUMN_WIDTH, startWidth + moveEvent.clientX - startX);
       setManualWidths(previous => ({ ...previous, [index]: Math.round(next) }));
     };
 
