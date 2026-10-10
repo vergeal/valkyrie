@@ -35,7 +35,8 @@ export function completionKind(kind: string): monaco.languages.CompletionItemKin
  */
 export function registerCompletionProvider(getContext: () => SuggestionContext): monaco.IDisposable {
   return monaco.languages.registerCompletionItemProvider("sql", {
-    triggerCharacters: [" ", "."],
+    /* 只在「.」后主动弹出（表别名.字段）；正常单词输入由 quickSuggestions 触发，空格不再触发 */
+    triggerCharacters: ["."],
     provideCompletionItems: async (model, position) => {
       const context = getContext();
 

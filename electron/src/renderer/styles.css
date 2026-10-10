@@ -1489,6 +1489,8 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
   --vscode-editorSuggestWidget-highlightForeground: var(--accent);
   --vscode-editorSuggestWidget-focusHighlightForeground: var(--accent);
   --vscode-editorSuggestWidgetStatus-foreground: var(--muted);
+  /* 按住 Cmd/Ctrl 悬停表名时的高亮色：超链接蓝（可点击） */
+  --vscode-editorLink-activeForeground: var(--accent);
   --vscode-editorWidget-background: var(--chrome);
   --vscode-editorWidget-border: var(--line);
   --vscode-editorWidget-foreground: var(--text);
@@ -1517,6 +1519,17 @@ table.grid tbody tr td.rownum.is-range { background: var(--cell-strong); }
 
 .editor-wrap .monaco-editor .suggest-widget .monaco-list-row {
   border-radius: 5px;
+}
+
+/* 文档里命中的表名：平时给一个语法高亮色；按住 Cmd/Ctrl 时由链接样式改成蓝色 + 手型 */
+.editor-wrap .monaco-editor .editor-table-ref {
+  color: var(--cyan);
+}
+
+/* 去掉 Monaco 链接默认的下划线，只保留颜色 / 手型变化 */
+.editor-wrap .monaco-editor .detected-link,
+.editor-wrap .monaco-editor .detected-link-active {
+  text-decoration: none;
 }
 
 /*

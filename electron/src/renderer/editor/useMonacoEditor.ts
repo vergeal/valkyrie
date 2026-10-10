@@ -6,6 +6,8 @@ import type { WorkTab } from "../app/appTypes";
 import type { SqlResolver } from "../tabs/tabHelpers";
 import { DEFAULT_SQL } from "../app/appConstants";
 import { registerCompletionProvider, type SuggestionContext } from "./completionProvider";
+import { registerTableHighlight } from "./tableHighlight";
+import { registerTableLinks } from "./tableLinks";
 import { ensureGithubDarkTheme, resolveThemeMode } from "./editorTheme";
 import { isQuerySql } from "../query/sqlText";
 
@@ -37,6 +39,10 @@ export interface UseMonacoEditorOptions {
   resolveSql?: SqlResolver;
   /** 选区 / 内容变化：报告当前（选区优先）是否为可分析的查询语句 */
   onSelectionChange?: (state: { hasSelection: boolean; canExplain: boolean }) => void;
+  /** 可打开的表名集合（小写），用于 Cmd/Ctrl + 点击表名打开 */
+  getTableNames?: () => Set<string>;
+  /** 点击表名时打开该表 */
+  onOpenTable?: (name: string) => void;
 }
 
 /** 当前编辑器里「要分析的 SQL」：有选区取选区，否则取全文，并判断是否为查询语句 */
@@ -55,7 +61,7 @@ function editorQueryState(editor: monaco.editor.IStandaloneCodeEditor): { hasSel
  * 补全 Provider / 快捷键命令 / 空格标记块装饰。
  */
 export function useMonacoEditor(options: UseMonacoEditorOptions) {
-  const { settings, containerRef, suggestionContextRef, runShortcutRef, formatShortcutRef, saveShortcutRef, onContentChange, activeTab, editorPanelRef, resolveSql, onSelectionChange } = options;
+  const { settings, containerRef, suggestionContextRef, runShortcutRef, formatShortcutRef, saveShortcutRef, onContentChange, activeTab, editorPanelRef, resolveSql, onSelectionChange, getTableNames, onOpenTable } = options;
 
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const suppressChange = useRef(false);
@@ -236,6 +242,18 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
     const completionProvider = registerCompletionProvider(() => suggestionContextRef.current);
 
     /*
+     * 表名表现：
+     * - 平时用装饰给语法高亮色（editor-table-ref）；
+     * - 按住 Cmd/Ctrl 时由 LinkProvider 标成链接（CSS 改成蓝色 + 手型，不下划线），点击打开表。
+     */
+    const tableHighlight = getTableNames
+      ? registerTableHighlight(editor, { getNames: getTableNames })
+      : null;
+    const tableLinks = getTableNames && onOpenTable
+      ? registerTableLinks({ getNames: getTableNames, onOpen: onOpenTable })
+      : null;
+
+    /*
      * 快捷键命令必须通过 ref 取「当前」的处理函数：这个 effect 只在挂载时跑一次，
      * 直接调用组件内的函数会闭包在首次渲染的状态上（那时 activeTab 还是 null，
      * 于是 Ctrl+S / Ctrl+Enter 都会静默返回）。
@@ -384,6 +402,8 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
       cancelAnimationFrame(retokenizeRaf);
       containerObserver.disconnect();
       completionProvider.dispose();
+      tableHighlight?.dispose();
+      tableLinks?.dispose();
       editor.dispose();
       editorRef.current = null;
     };

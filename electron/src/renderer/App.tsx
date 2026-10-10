@@ -484,6 +484,32 @@ export function App() {
   const { runShortcutRef, formatShortcutRef, saveShortcutRef } = useEditorShortcutRefs();
 
   /*
+   * Cmd/Ctrl + 点击表名打开：表名 → 已加载的表 / 视图节点。
+   * 节点与打开动作都放 ref，供只注册一次的编辑器 LinkProvider 读取最新值。
+   */
+  const tableNodeByName = useMemo(() => {
+    const map = new Map<string, SchemaNode>();
+    const consider = (nodes: SchemaNode[] | undefined) => {
+      for (const node of nodes ?? []) {
+        if (((node.kind === "TABLE" && node.table) || node.kind === "VIEW") && !map.has(node.label.toLowerCase()))
+          map.set(node.label.toLowerCase(), node);
+      }
+    };
+
+    consider(roots);
+
+    for (const nodes of Object.values(treeChildren))
+      consider(nodes);
+
+    return map;
+  }, [roots, treeChildren]);
+
+  const tableNodeByNameRef = useRef(tableNodeByName);
+  tableNodeByNameRef.current = tableNodeByName;
+  const openTableDataRef = useRef(openTableData);
+  openTableDataRef.current = openTableData;
+
+  /*
    * Monaco 编辑器的生命周期集中在这里：创建 / 选项 / 主题 / 内容与当前标签同步 /
    * 补全 Provider / 快捷键命令 / 缩进空白标记。命令通过上面几个 ref 取「当前」处理函数。
    */
@@ -499,6 +525,13 @@ export function App() {
     resolveSql,
     onSelectionChange: state =>
       setEditorCanExplain(previous => previous === state.canExplain ? previous : state.canExplain),
+    getTableNames: () => new Set(tableNodeByNameRef.current.keys()),
+    onOpenTable: name => {
+      const node = tableNodeByNameRef.current.get(name.toLowerCase());
+
+      if (node)
+        void openTableDataRef.current(node);
+    },
     onContentChange: value => {
       const tabId = activeTabRef.current;
 
