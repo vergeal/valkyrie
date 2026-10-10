@@ -75,21 +75,25 @@ export function visibleRowIndices(rows: (string | null)[][], keyword: string): n
  *
  * 格子里出现制表符 / 换行 / 双引号时按 Excel 的惯例用双引号包起来（内部引号翻倍），
  * 否则粘到 Excel 会被拆成多格；NULL 按空格子处理。
+ * includeHeader 为 true 时，第一行输出所选列的列名。
  */
-export function gridSelectionToTsv(selection: GridSelection, result: QueryResultPayload): string {
+export function gridSelectionToTsv(selection: GridSelection, result: QueryResultPayload, includeHeader = false): string {
   const rows = selectionRows(selection);
   const cols = selectionCols(selection);
 
+  const quote = (text: string) => /["\t\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   const cell = (rowIndex: number, colIndex: number) => {
     const value = result.rows?.[rowIndex]?.[colIndex];
-    const text = value == null ? "" : String(value);
 
-    return /["\t\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    return quote(value == null ? "" : String(value));
   };
 
-  return rows
-    .map(rowIndex => cols.map(colIndex => cell(rowIndex, colIndex)).join("\t"))
-    .join("\r\n");
+  const lines = rows.map(rowIndex => cols.map(colIndex => cell(rowIndex, colIndex)).join("\t"));
+
+  if (includeHeader)
+    lines.unshift(cols.map(colIndex => quote(result.columns?.[colIndex]?.label ?? "")).join("\t"));
+
+  return lines.join("\r\n");
 }
 
 /** SQL 字面量：NULL 原样，其余单引号转义后包起来 */

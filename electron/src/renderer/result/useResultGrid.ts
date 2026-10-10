@@ -91,6 +91,14 @@ export function useResultGrid(options: UseResultGridOptions) {
     await copyText(gridSelectionToTsv(gridSelection, currentResult));
   }
 
+  /** 复制选区，并在首行带上所选列的列名（粘到 Excel 有表头） */
+  async function copyGridSelectionWithHeader() {
+    if (!gridSelection || !currentResult?.rows)
+      return;
+
+    await copyText(gridSelectionToTsv(gridSelection, currentResult, true));
+  }
+
   /*
    * 粘贴结果表选区：读剪贴板（制表符分隔）。
    * - 选中多个单元格时：把剪贴板内容按块「平铺」填满整个选区（单个值就填满，
@@ -381,7 +389,7 @@ export function useResultGrid(options: UseResultGridOptions) {
     await runResultAction("result.rollback", {}, "已回滚未提交的修改");
   }
 
-  async function copyRows(format: "json" | "insert" | "update") {
+  async function copyRows(format: "json" | "insert" | "update" | "markdown") {
     if (!currentResult?.columns || !currentResult.rows)
       return;
 
@@ -395,6 +403,22 @@ export function useResultGrid(options: UseResultGridOptions) {
 
     if (format === "json") {
       await copyText(JSON.stringify(selectedRows.map(row => rowToJson(columns, row ?? [])), null, 2));
+      return;
+    }
+
+    if (format === "markdown") {
+      /* Markdown 表格：列名表头 + 分隔行 + 数据行；竖线转义、换行转 <br> */
+      const escapeCell = (value: string | null) => {
+        const text = value == null ? "" : String(value);
+
+        return text.replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>");
+      };
+
+      const header = `| ${columns.map(column => escapeCell(column.label)).join(" | ")} |`;
+      const divider = `| ${columns.map(() => "---").join(" | ")} |`;
+      const body = selectedRows.map(row => `| ${columns.map((_, index) => escapeCell(row?.[index] ?? null)).join(" | ")} |`);
+
+      await copyText([header, divider, ...body].join("\n"));
       return;
     }
 
@@ -498,6 +522,7 @@ export function useResultGrid(options: UseResultGridOptions) {
   /* 结果表右键菜单（Radix ContextMenu 负责弹出/定位/关闭） */
   const gridMenuEntries: MenuEntry[] = [
     { label: resultActions.copy.label, icon: "copy", disabled: resultActions.copy.disabled, action: resultActions.copy.run },
+    { label: "复制（含列名）", icon: "copy", disabled: resultActions.copy.disabled, action: () => void copyGridSelectionWithHeader() },
     { label: "粘贴", icon: "copy", disabled: !currentResult?.editable, action: () => void pasteGridSelection() },
     { separator: true },
     { label: resultActions.commit.label, disabled: resultActions.commit.disabled, action: resultActions.commit.run },
@@ -511,7 +536,8 @@ export function useResultGrid(options: UseResultGridOptions) {
       children: [
         { label: "INSERT 语句", action: () => void copyRows("insert") },
         { label: "UPDATE 语句", action: () => void copyRows("update") },
-        { label: "JSON", action: () => void copyRows("json") }
+        { label: "JSON", action: () => void copyRows("json") },
+        { label: "Markdown 表格", action: () => void copyRows("markdown") }
       ]
     },
     { separator: true },
