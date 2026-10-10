@@ -58,6 +58,7 @@ import { AppTitlebar } from "./ui/AppTitlebar";
 import { AppMenuBar } from "./ui/AppMenuBar";
 import { AppStatusBar } from "./ui/AppStatusBar";
 import { InfoPanel } from "./ui/InfoPanel";
+import { PlanInfoPanel } from "./ui/PlanInfoPanel";
 import { AppDialogs } from "./ui/AppDialogs";
 import { AppToolbar } from "./ui/AppToolbar";
 import { SidePanel } from "./ui/SidePanel";
@@ -977,15 +978,24 @@ export function App() {
         <Separator className="splitter splitter-v splitter-info" aria-label="调整对象信息宽度" />
 
         <Panel id="info" className="info-panel" defaultSize="19%" minSize="12%" maxSize="30%">
-          <InfoPanel
-            node={infoNode}
-            connectionName={infoSession?.name ?? null}
-            product={infoSession?.product ?? null}
-            columns={infoColumns}
-            indexes={infoIndexes}
-            onOpenData={openTableData}
-            onDesign={openTableDesign}
-          />
+          {activeTab?.kind === "query" && resultPane === "plan" ? (
+            <PlanInfoPanel
+              plan={activeTab.plan}
+              sql={activeTab.planSql}
+              dbType={activeTab.planDbType}
+              onCopy={copyText}
+            />
+          ) : (
+            <InfoPanel
+              node={infoNode}
+              connectionName={infoSession?.name ?? null}
+              product={infoSession?.product ?? null}
+              columns={infoColumns}
+              indexes={infoIndexes}
+              onOpenData={openTableData}
+              onDesign={openTableDesign}
+            />
+          )}
         </Panel>
       </Group>
 

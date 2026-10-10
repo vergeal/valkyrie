@@ -331,12 +331,7 @@ export function ResultPane(props: {
         )}
 
         {resultPane === "plan" && !pageTab && (
-          <PlanPane
-            plan={activeTab?.kind === "query" ? activeTab.plan : null}
-            sql={activeTab?.kind === "query" ? activeTab.planSql : undefined}
-            dbType={activeTab?.kind === "query" ? activeTab.planDbType : undefined}
-            onCopy={copyText}
-          />
+          <PlanPane plan={activeTab?.kind === "query" ? activeTab.plan : null} />
         )}
 
         {/* 日志面板常驻（切到别的页时保留筛选/搜索状态），不可见时列表不渲染，避免白跑 */}

@@ -2061,6 +2061,20 @@ table.table-list .table-name-text {
 
 .plan-analysis .plan-section-title { margin-bottom: 6px; }
 
+/* 右侧「执行计划分析」面板：内容占满剩余高度并滚动 */
+.plan-info {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 12px 12px;
+}
+
+.plan-info .plan-findings { margin-top: 0; }
+.plan-info .plan-section-title { margin-bottom: 6px; }
+
 .plan-summary {
   display: flex;
   align-items: center;
