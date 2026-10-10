@@ -305,7 +305,10 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       const payload = await invoke<QueryResultPayload>("query.execute", {
         sessionId: target.sessionId,
         sql: explainStatement(source, dbType),
-        jobId
+        jobId,
+        /* 带上控制台选的库/模式：EXPLAIN 要在正确的模式里找表（达梦 / PostgreSQL 尤其需要） */
+        catalog: activeTab.path.catalog,
+        schema: activeTab.path.schema
       });
 
       updateTab(tabId, { plan: payload, planSql: source, planDbType: dbType });

@@ -259,6 +259,87 @@ const analyzeSqlite: Analyzer = (plan, sql, findings, suggestions) => {
   }
 };
 
+/** 达梦：EXPLAIN FOR 返回每步一行，含 OPERATION / TAB_NAME / IDX_NAME / FILTER / ADVICE_INFO */
+const analyzeDm: Analyzer = (plan, sql, findings, suggestions) => {
+  const columns = plan.columns ?? [];
+  const rows = plan.rows ?? [];
+  const fallbackColumns = columnsFromSql(sql);
+  let totalCost = 0;
+
+  for (const row of rows) {
+    const operation = cell(row, columns, "operation").toUpperCase();
+    const table = cell(row, columns, "tab_name");
+    const index = cell(row, columns, "idx_name");
+    const scanType = cell(row, columns, "scan_type");
+    const filter = cell(row, columns, "filter");
+    const advice = cell(row, columns, "advice_info");
+    const estimated = Number(cell(row, columns, "row_nums") || "0");
+    const cost = Number(cell(row, columns, "cost") || "0");
+    const tab = table && table.toUpperCase() !== "NULL" ? table : "";
+    const label = tab || "结果集";
+    const idx = index && index.toUpperCase() !== "NULL" ? index : "";
+
+    totalCost += Number.isFinite(cost) ? cost : 0;
+
+    if (!operation)
+      continue;
+
+    if (operation.startsWith("CSCN")) {
+      /* 小表（如 SYSDUAL、几十行）全扫无所谓，只对较大表报风险 */
+      const significant = estimated >= 1000;
+      findings.push({
+        level: significant ? "warn" : "info",
+        title: `${significant ? "全表扫描" : "表扫描"}：${label}`,
+        detail: estimated > 0 ? `预估扫描 ${estimated.toLocaleString()} 行` : "未使用索引"
+      });
+
+      if (significant && tab) {
+        const parsed = extractConditionColumns(filter);
+        const used = parsed.length ? parsed : fallbackColumns;
+
+        suggestions.push({
+          title: `为 ${tab} 建立索引`,
+          detail: "为过滤 / 连接列建索引，可把全表扫描转为索引扫描",
+          sql: used.length ? `CREATE INDEX idx_${safeName(tab)}_${safeName(used[0])} ON ${tab} (${used.join(", ")});` : undefined
+        });
+      }
+    } else if (/^(SSCN|SSEK)/.test(operation)) {
+      findings.push({ level: "info", title: `索引扫描：${label}`, detail: idx ? `使用索引 ${idx}` : scanType || undefined });
+    } else if (operation.includes("BLKUP")) {
+      findings.push({ level: "warn", title: `回表查询：${label}`, detail: idx ? `索引 ${idx} 未覆盖查询列，需回表取数` : undefined });
+    } else if (operation.includes("SORT")) {
+      findings.push({ level: "warn", title: "排序操作", detail: filter || undefined });
+      suggestions.push({ title: "减少排序开销", detail: "为 ORDER BY / GROUP BY 列建立有序索引可消除排序步骤" });
+    } else if (/HAGR/.test(operation)) {
+      findings.push({ level: "warn", title: "哈希聚合", detail: "聚合数据量较大，建议先过滤再聚合或为分组列建索引" });
+    }
+
+    /* 达梦自带优化建议：形如 OPENSER.TABLE(col1,col2)，直接转成可执行建索引语句 */
+    if (advice && advice.toUpperCase() !== "NULL") {
+      const parsed = advice.match(/^([\w.]+)\s*\(([^)]*)\)$/);
+
+      if (parsed) {
+        const qualified = parsed[1];
+        const shortTable = qualified.split(".").pop() ?? qualified;
+        const adviceColumns = parsed[2].split(",").map(item => item.trim()).filter(Boolean);
+
+        suggestions.push({
+          title: `达梦建议索引：${qualified}`,
+          detail: `建议列：${adviceColumns.join(", ") || "(无)"}`,
+          sql: adviceColumns.length
+            ? `CREATE INDEX idx_${safeName(shortTable)}_${safeName(adviceColumns[0])} ON ${qualified} (${adviceColumns.join(", ")});`
+            : undefined
+        });
+      } else {
+        suggestions.push({ title: "达梦计划建议", detail: advice });
+      }
+    }
+  }
+
+  if (totalCost >= 10000)
+    findings.push({ level: "warn", title: "计划总代价偏高", detail: `总成本 ${totalCost.toLocaleString()}，建议复核索引与查询写法` });
+};
+
 /** 达梦 / 未知类型：没有稳定的列结构，退化为关键词扫描 */
 const analyzeGeneric: Analyzer = (plan, _sql, findings, suggestions) => {
   const text = (plan.rows ?? []).map(row => row.map(value => value ?? "").join(" ")).join("\n");
@@ -280,7 +361,8 @@ const analyzeGeneric: Analyzer = (plan, _sql, findings, suggestions) => {
 const ANALYZERS: Record<string, Analyzer> = {
   mysql: analyzeMysql,
   postgresql: analyzePostgresql,
-  sqlite: analyzeSqlite
+  sqlite: analyzeSqlite,
+  dm: analyzeDm
 };
 
 function uniqueBy<T>(items: T[], key: (item: T) => string): T[] {

@@ -22,8 +22,9 @@ export function isQuerySql(sql: string): boolean {
 }
 
 /**
- * 生成执行计划语句。SQLite 需要 EXPLAIN QUERY PLAN 才是可读的查询计划，
- * 其余数据库统一用 EXPLAIN（不加 ANALYZE，避免真正执行语句产生副作用）。
+ * 生成执行计划语句。SQLite 需要 EXPLAIN QUERY PLAN 才是可读的查询计划；
+ * 达梦必须用 EXPLAIN FOR（普通 EXPLAIN 不返回结果集）；其余数据库统一用 EXPLAIN
+ * （不加 ANALYZE，避免真正执行语句产生副作用）。
  */
 export function explainStatement(sql: string, dbType?: string): string {
   const cleaned = sql.replace(/;\s*$/, "");
@@ -31,6 +32,9 @@ export function explainStatement(sql: string, dbType?: string): string {
 
   if (type === "sqlite")
     return `EXPLAIN QUERY PLAN ${cleaned}`;
+
+  if (type === "dm")
+    return `EXPLAIN FOR ${cleaned}`;
 
   return `EXPLAIN ${cleaned}`;
 }
