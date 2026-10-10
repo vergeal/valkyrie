@@ -210,6 +210,9 @@ public class SuggestionEngine
                 Map<String, List<Suggestion>> derivedColumns = new LinkedHashMap<>();
                 extractDerivedColumns(statement, derivedColumns);
 
+                /* CTE：WITH name AS ( ... ) → name 的输出列，例如 T. / U. */
+                extractCteColumns(statement, derivedColumns);
+
                 /* 形如 t0. / table. 的限定名：只返回对应表的字段 */
                 Matcher qualifier = QUALIFIER.matcher(before);
                 if (qualifier.find()) {
@@ -311,6 +314,134 @@ public class SuggestionEngine
 
                         from = close + 1;
                 }
+        }
+
+        /** 标识符与其结束下标 */
+        private record Ident(String value, int end) {}
+
+        /**
+         * 解析 CTE：{@code WITH [RECURSIVE] name [(cols)] AS ( 子查询 ), ... }，
+         * 把每个 CTE 的输出列注册到它的名字上（例如 T. / U.）。
+         */
+        private void extractCteColumns(String statement, Map<String, List<Suggestion>> derived)
+        {
+                int withAt = indexOfKeyword(statement, "with", 0);
+
+                /* 只处理以 WITH 开头的整条语句 */
+                if (withAt < 0 || !statement.substring(0, withAt).trim().isEmpty())
+                        return;
+
+                int i = skipWhitespace(statement, withAt + 4);
+
+                if (keywordAt(statement, i, "recursive"))
+                        i = skipWhitespace(statement, i + "recursive".length());
+
+                while (i < statement.length()) {
+                        i = skipWhitespace(statement, i);
+                        Ident name = readIdentifier(statement, i);
+
+                        if (name == null)
+                                return;
+
+                        i = skipWhitespace(statement, name.end());
+                        List<String> explicit = null;
+
+                        if (i < statement.length() && statement.charAt(i) == '(') {
+                                int close = matchingParen(statement, i);
+
+                                if (close < 0)
+                                        return;
+
+                                explicit = splitTopLevel(statement.substring(i + 1, close));
+                                i = skipWhitespace(statement, close + 1);
+                        }
+
+                        if (!keywordAt(statement, i, "as"))
+                                return;
+
+                        i = skipWhitespace(statement, i + 2);
+
+                        if (i >= statement.length() || statement.charAt(i) != '(')
+                                return;
+
+                        int close = matchingParen(statement, i);
+
+                        if (close < 0)
+                                return;
+
+                        List<Suggestion> columns = new ArrayList<>();
+
+                        if (explicit != null) {
+                                for (String column : explicit) {
+                                        String trimmed = column.trim();
+
+                                        if (!trimmed.isEmpty())
+                                                columns.add(Suggestion.ofField(unquote(trimmed), ""));
+                                }
+                        } else {
+                                columns = selectListColumns(statement.substring(i + 1, close));
+                        }
+
+                        if (!columns.isEmpty())
+                                derived.put(name.value().toLowerCase(), columns);
+
+                        i = skipWhitespace(statement, close + 1);
+
+                        if (i < statement.length() && statement.charAt(i) == ',') {
+                                i++;
+                                continue;
+                        }
+
+                        return;
+                }
+        }
+
+        /** 从 start 读一个标识符（支持引号）；读不到返回 null */
+        private static Ident readIdentifier(String text, int start)
+        {
+                if (start >= text.length())
+                        return null;
+
+                char c = text.charAt(start);
+
+                if (isQuote(c)) {
+                        int end = skipQuoted(text, start);
+                        int stop = Math.min(end + 1, text.length());
+                        return new Ident(unquote(text.substring(start, stop)), stop);
+                }
+
+                int i = start;
+
+                while (i < text.length() && isIdentChar(text.charAt(i)))
+                        i++;
+
+                if (i == start)
+                        return null;
+
+                return new Ident(text.substring(start, i), i);
+        }
+
+        private static int skipWhitespace(String text, int from)
+        {
+                int i = Math.max(0, from);
+
+                while (i < text.length() && Character.isWhitespace(text.charAt(i)))
+                        i++;
+
+                return i;
+        }
+
+        /** 判断 index 处是否为完整的关键字（前后是词边界，大小写不敏感） */
+        private static boolean keywordAt(String text, int index, String keyword)
+        {
+                if (index < 0 || index + keyword.length() > text.length())
+                        return false;
+
+                if (!text.regionMatches(true, index, keyword, 0, keyword.length()))
+                        return false;
+
+                return (index == 0 || !isIdentChar(text.charAt(index - 1)))
+                        && (index + keyword.length() >= text.length() || !isIdentChar(text.charAt(index + keyword.length())));
         }
 
         /** 返回与 text[open] 配对的右括号下标；找不到返回 -1 */
