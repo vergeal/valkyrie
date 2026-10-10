@@ -132,6 +132,18 @@ function emptyNpmrc() {
   return file;
 }
 
+/**
+ * package.json 里声明、但 node_modules 里不存在的依赖。
+ * 安装中断（网络/代理失败）会留下这种「装了一半」的状态：
+ * 打包时依赖缺失只会被当成外部模块跳过，最后表现为白屏，很难看出原因。
+ */
+function missingDependencies() {
+  const manifest = require(path.join(electronDir, "package.json"));
+  const declared = Object.keys({ ...manifest.dependencies, ...manifest.devDependencies });
+
+  return declared.filter(name => !fs.existsSync(path.join(electronDir, "node_modules", ...name.split("/"))));
+}
+
 /* ------------------------------ 步骤 ------------------------------ */
 
 function ensureDependencies() {
@@ -140,12 +152,17 @@ function ensureDependencies() {
     return;
   }
 
-  if (fs.existsSync(path.join(electronDir, "node_modules", "electron"))) {
+  const installed = fs.existsSync(path.join(electronDir, "node_modules", "electron"));
+  const missing = installed ? missingDependencies() : [];
+
+  if (installed && missing.length === 0) {
     step("依赖已就绪");
     return;
   }
 
-  step("首次运行，安装前端依赖（可能耗时几分钟）…");
+  step(missing.length
+    ? `依赖不完整（缺少 ${missing.join("、")}），重新安装（可能耗时几分钟）…`
+    : "首次运行，安装前端依赖（可能耗时几分钟）…");
 
   const attempts = [
     { args: ["install", "--no-audit", "--no-fund"], label: "默认配置" },
