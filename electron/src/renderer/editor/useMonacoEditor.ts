@@ -106,7 +106,8 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
         highlightActiveIndentation: initial.editorWhitespace
       },
       lineNumbersMinChars: 3,
-      scrollBeyondLastLine: false,
+      /* 与 VS Code 一致：最后一行下面留一页可滚动空白，别让内容顶死在底边 */
+      scrollBeyondLastLine: true,
       /* 滚动条收细，和界面其它区域保持一致 */
       scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10, useShadows: false },
       renderLineHighlight: "line",
