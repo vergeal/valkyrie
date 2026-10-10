@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type * as monaco from "monaco-editor";
-import { onShortcut } from "../api";
+import { onShortcut, requestPaste } from "../api";
 import type { QueryResultPayload } from "../api";
 import type { WorkTab } from "../app/appTypes";
 import type { GridSelection } from "../result/resultHelpers";
@@ -86,6 +86,25 @@ export function useQueryShortcuts(deps: QueryShortcutsDeps) {
   const selectAllRef = useRef<() => void>(() => undefined);
   selectAllRef.current = () => void selectAllInPage();
 
+  /* 粘贴入口：输入框 / 编辑器 → 系统默认粘贴；结果表 → 批量粘贴 */
+  const pasteRef = useRef<() => void>(() => undefined);
+  pasteRef.current = () => {
+    const focused = document.activeElement as HTMLElement | null;
+
+    /* 单元格编辑框也是 input，且位于 .grid-wrap 内：必须先判断输入类焦点 */
+    if (focused?.closest?.("input, textarea, .editor")) {
+      void requestPaste();
+      return;
+    }
+
+    if (focused?.closest?.(".grid-wrap")) {
+      onPasteGrid?.();
+      return;
+    }
+
+    void requestPaste();
+  };
+
   /**
    * Ctrl+C 的复制入口：只有「结果表」上下文才接管（对象页 / 设计页没有网格，
    * 那里的选区是上一个标签留下来的，不能拿它覆盖系统默认复制）。
@@ -102,10 +121,29 @@ export function useQueryShortcuts(deps: QueryShortcutsDeps) {
     return true;
   };
 
+  /**
+   * Ctrl+V 的粘贴入口：只有焦点在结果表时接管，返回 true 表示已处理。
+   * 用 ref 取最新值——keydown 只注册一次，直接用闭包里的回调会停在初始状态。
+   */
+  const gridPasteRef = useRef<() => boolean>(() => false);
+  gridPasteRef.current = () => {
+    const focused = document.activeElement as HTMLElement | null;
+
+    if (focused?.closest?.(".grid-wrap")) {
+      onPasteGrid?.();
+      return true;
+    }
+
+    return false;
+  };
+
   /* macOS 菜单栏把 ⌘A 转发过来（原生菜单会先吃掉这个组合键） */
   useEffect(() => onShortcut(action => {
     if (action === "select-all")
       selectAllRef.current();
+
+    if (action === "paste")
+      pasteRef.current();
 
     /* macOS 菜单栏把 ⌘C 转发过来：结果表有选区就复制成制表符分隔，否则走系统默认复制 */
     if (action === "copy") {
@@ -168,7 +206,7 @@ export function useQueryShortcuts(deps: QueryShortcutsDeps) {
 
       /* Ctrl+V：结果表获得焦点时批量粘贴（输入框 / 编辑器交给系统默认粘贴） */
       if (!shift && key === "v") {
-        if (!target?.closest?.("input, textarea") && onPasteGrid?.())
+        if (!target?.closest?.("input, textarea") && gridPasteRef.current())
           event.preventDefault();
 
         return;

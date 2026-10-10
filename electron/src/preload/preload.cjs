@@ -60,6 +60,9 @@ contextBridge.exposeInMainWorld("valkyrie", {
   /* 读系统剪贴板文本（结果表批量粘贴） */
   readClipboard: () => ipcRenderer.invoke("valkyrie:read-clipboard"),
 
+  /* 让聚焦元素执行系统默认粘贴（结果表以外的场景） */
+  paste: () => ipcRenderer.invoke("valkyrie:paste"),
+
   /* 导出另存为 / 在文件夹中显示 */
   chooseSavePath: options => ipcRenderer.invoke("valkyrie:choose-save-path", options),
 

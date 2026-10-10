@@ -226,6 +226,8 @@ declare global {
       writeClipboard?: (text: string) => Promise<boolean>;
       /** 读系统剪贴板文本（结果表批量粘贴） */
       readClipboard?: () => Promise<string>;
+      /** 让聚焦元素执行系统默认粘贴 */
+      paste?: () => Promise<void>;
       chooseSavePath?: (options: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
       chooseOpenPath?: (options: { title?: string; defaultPath?: string; directory?: boolean; filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
       revealPath?: (target: string) => Promise<boolean>;
@@ -316,6 +318,11 @@ export function readClipboard(): Promise<string> {
     return navigator.clipboard.readText().catch(() => "");
 
   return Promise.resolve("");
+}
+
+/** 让聚焦元素执行系统默认粘贴（结果表以外的场景） */
+export function requestPaste(): Promise<void> {
+  return window.valkyrie?.paste?.() ?? Promise.resolve();
 }
 
 export function chooseSavePath(options: { title?: string; defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null> {

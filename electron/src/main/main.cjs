@@ -176,7 +176,14 @@ async function listSystemFontFamilies() {
           accelerator: "CommandOrControl+C",
           click: (_item, window) => window?.webContents.send("valkyrie:shortcut", "copy")
         },
-        { role: "paste" },
+        /*
+         * 粘贴：不注册加速键，让 ⌘/Ctrl+V 直接落到渲染层（keydown 统一处理结果表 /
+         * 输入框 / 编辑器）；菜单项本身只保留点击时转发，方便用菜单触发。
+         */
+        {
+          label: "粘贴",
+          click: (_item, window) => window?.webContents.send("valkyrie:shortcut", "paste")
+        },
         { role: "pasteAndMatchStyle" },
         { type: "separator" },
         {
@@ -472,6 +479,12 @@ function registerIpc() {
 
   /* 读系统剪贴板文本（结果表批量粘贴走主进程，比 navigator.clipboard 可靠） */
   ipcMain.handle("valkyrie:read-clipboard", () => clipboard.readText());
+
+  /* 让聚焦元素执行系统默认粘贴（macOS 菜单「粘贴」转发到渲染层后，非结果表时回退到这里） */
+  ipcMain.handle("valkyrie:paste", event => {
+    BrowserWindow.fromWebContents(event.sender)?.webContents.paste();
+    return true;
+  });
 
   /* 导出另存为：由主进程弹系统对话框，返回用户选择的路径 */
   ipcMain.handle("valkyrie:choose-save-path", async (event, options) => {

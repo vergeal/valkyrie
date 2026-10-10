@@ -98,7 +98,7 @@ export function useResultGrid(options: UseResultGridOptions) {
    * - 只选中一个单元格时：从该单元格起按块写入（块可能比单元格大）。
    * 全部进「未提交缓冲」，不越界；只读结果不处理。
    */
-  async function pasteGridSelection() {
+  async function pasteGridSelection(text?: string) {
     if (!activeTab || !("result" in activeTab) || !activeTab.result?.jobId)
       return;
 
@@ -107,7 +107,7 @@ export function useResultGrid(options: UseResultGridOptions) {
     if (!result.editable)
       return;
 
-    const grid = parseClipboardGrid(await readClipboard());
+    const grid = parseClipboardGrid(text ?? await readClipboard());
 
     if (grid.length === 0)
       return;
