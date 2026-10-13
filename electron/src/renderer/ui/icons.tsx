@@ -41,6 +41,7 @@ import {
   Lock,
   MonitorSmartphone,
   Moon,
+  Network,
   Pencil,
   Play,
   Plug,
@@ -162,6 +163,7 @@ const ICONS: Record<string, ComponentType<{ size?: number; className?: string; s
   paste: ClipboardPaste,
   duplicate: CopyPlus,
   cut: Scissors,
+  er: Network,
   alert: TriangleAlert,
   ok: CircleCheck,
   fail: CircleAlert

@@ -258,6 +258,53 @@ public class MySQLDriver extends Driver
                 return triggers;
         }
 
+        /**
+         * ER 图：一条 SQL 取回整个库的主键与外键。
+         * <p>
+         * {@code KEY_COLUMN_USAGE} 里 {@code CONSTRAINT_NAME = 'PRIMARY'} 是主键、
+         * {@code REFERENCED_TABLE_NAME} 不为空的是外键，按 {@code ORDINAL_POSITION} 排序
+         * 即可拿到多字段约束的字段顺序。
+         */
+        @Override
+        public TableRelations getTableRelations(Session session)
+        {
+                TableRelations relations = new TableRelations();
+
+                QueryResult result = execute(session, """
+                        SELECT
+                          `TABLE_NAME` AS `tableName`,
+                          `CONSTRAINT_NAME` AS `constraintName`,
+                          `COLUMN_NAME` AS `columnName`,
+                          `REFERENCED_TABLE_SCHEMA` AS `refCatalog`,
+                          `REFERENCED_TABLE_NAME` AS `refTable`,
+                          `REFERENCED_COLUMN_NAME` AS `refColumn`
+                        FROM
+                          information_schema.KEY_COLUMN_USAGE
+                        WHERE
+                          `TABLE_SCHEMA` = '%s'
+                          AND (`CONSTRAINT_NAME` = 'PRIMARY' OR `REFERENCED_TABLE_NAME` IS NOT NULL)
+                        ORDER BY
+                          `TABLE_NAME`, `CONSTRAINT_NAME`, `ORDINAL_POSITION`;
+                        """, session.catalog());
+
+                for (int i = 0; i < result.size(); i++) {
+                        String table = result.getRowValue(i, "tableName");
+                        String refTable = result.getRowValue(i, "refTable");
+
+                        if (refTable == null || refTable.isEmpty()) {
+                                relations.addPrimaryKey(table, result.getRowValue(i, "columnName"));
+                                continue;
+                        }
+
+                        relations.addForeignKey(table, result.getRowValue(i, "constraintName"),
+                                result.getRowValue(i, "columnName"), refTable,
+                                result.getRowValue(i, "refColumn"),
+                                result.getRowValue(i, "refCatalog"), null);
+                }
+
+                return relations;
+        }
+
         @Override
         public List<ForeignKey> getForeignKeys(Session session, String table)
         {

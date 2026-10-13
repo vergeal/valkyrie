@@ -71,6 +71,14 @@ export interface DesignTab extends BaseTab {
   loading: boolean;
 }
 
+/** ER 图：按库 / 模式画表与表之间的关系（只读，不落盘） */
+export interface ErTab extends BaseTab {
+  kind: "er";
+  connection?: string;
+  /** 图对应的容器节点（库 / 模式 / 表容器），加载数据时把它交给数据层 */
+  node: SchemaNode;
+}
+
 /**
  * 「对象」列：属于当前连接的一个固定页面，内容跟着对象树的选中项走 ——
  * 选中库 / 表 → 数据表列表，选中脚本 → 脚本列表；断开连接时一起关闭。
@@ -100,7 +108,7 @@ export interface ObjectTabScripts extends BaseTab {
 
 export type ObjectTab = ObjectTabTables | ObjectTabScripts;
 
-export type WorkTab = QueryTab | DataTab | DesignTab | ObjectTab | AutomationTab;
+export type WorkTab = QueryTab | DataTab | DesignTab | ErTab | ObjectTab | AutomationTab;
 
 export type ResultPane = "grid" | "msg" | "plan" | "log";
 

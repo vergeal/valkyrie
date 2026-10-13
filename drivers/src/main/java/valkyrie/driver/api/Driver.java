@@ -20,6 +20,8 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static valkyrie.utils.string.StrStaticImports.fmt;
+import static valkyrie.utils.string.StrStaticImports.strieq;
+import static valkyrie.utils.string.StrStaticImports.strempty;
 
 /**
  * JDBC 驱动抽象层。
@@ -393,7 +395,11 @@ public abstract class Driver implements SQLExecutor
         }
 
         /**
-         * 获取指定表的外键列表。默认不支持（返回空），需要展示外键的数据库自行覆写。
+         * 获取指定表的外键列表。
+         * <p>
+         * 默认走 JDBC 标准的 {@link DatabaseMetaData#getImportedKeys(String, String, String)}：
+         * MySQL / PostgreSQL / SQLite / 达梦 都实现了它，各产品因此不必各写一套字典表 SQL；
+         * 需要额外信息（比如自己的约束命名规则）的产品可以覆写。
          *
          * @param session 会话上下文，包含 catalog 和 schema 过滤条件
          * @param table   表名称
@@ -401,7 +407,116 @@ public abstract class Driver implements SQLExecutor
          */
         public List<ForeignKey> getForeignKeys(Session session, String table)
         {
-                return Lists.emptyList();
+                Map<String, ForeignKey> keys = new LinkedHashMap<>();
+
+                try (Connection connection = getConnection(session);
+                     ResultSet rs = connection.getMetaData().getImportedKeys(
+                             connection.getCatalog(), connection.getSchema(), table)) {
+                        while (rs.next()) {
+                                /* 部分驱动会忽略过滤条件把整库外键都报出来，这里按本表名再过滤一次 */
+                                if (!strieq(rs.getString("FKTABLE_NAME"), table))
+                                        continue;
+
+                                /* 元数据不给约束名时拼一个，界面按名字分组展示 */
+                                String name = rs.getString("FK_NAME");
+
+                                if (strempty(name))
+                                        name = rs.getString("FKTABLE_NAME") + "_" + rs.getString("PKTABLE_NAME");
+
+                                ForeignKey key = keys.computeIfAbsent(name, k ->
+                                {
+                                        ForeignKey created = new ForeignKey();
+                                        created.setName(k);
+                                        created.setColumns(new ArrayList<>());
+                                        created.setRefColumns(new ArrayList<>());
+                                        return created;
+                                });
+
+                                key.setRefCatalog(rs.getString("PKTABLE_CAT"));
+                                key.setRefSchema(rs.getString("PKTABLE_SCHEM"));
+                                key.setRefTable(rs.getString("PKTABLE_NAME"));
+                                key.getColumns().add(rs.getString("FKCOLUMN_NAME"));
+                                key.getRefColumns().add(rs.getString("PKCOLUMN_NAME"));
+                        }
+                } catch (Exception e) {
+                        throw new DriverException(e);
+                }
+
+                return Lists.newArrayList(keys.values());
+        }
+
+        /**
+         * 获取指定表的主键字段名。
+         * <p>
+         * 默认走 JDBC 标准的 {@link DatabaseMetaData#getPrimaryKeys(String, String, String)}，
+         * 各产品通用；字段顺序按 {@code KEY_SEQ}（即主键列顺序）返回。
+         *
+         * @param session 会话上下文，包含 catalog 和 schema 过滤条件
+         * @param table   表名称
+         * @return 主键字段名列表（可能为空，但不为 {@code null}）
+         */
+        public List<String> getPrimaryKeys(Session session, String table)
+        {
+                List<String> keys = new ArrayList<>();
+
+                try (Connection connection = getConnection(session);
+                     ResultSet rs = connection.getMetaData().getPrimaryKeys(
+                             connection.getCatalog(), connection.getSchema(), table)) {
+                        while (rs.next()) {
+                                if (strieq(rs.getString("TABLE_NAME"), table))
+                                        keys.add(rs.getString("COLUMN_NAME"));
+                        }
+                } catch (Exception e) {
+                        throw new DriverException(e);
+                }
+
+                return keys;
+        }
+
+        /**
+         * ER 图用：一次取回某个库 / 模式下所有表的主键与外键。
+         * <p>
+         * 默认按表逐个读 JDBC 元数据——通用但慢，远端库上几百张表就是几百次往返；
+         * MySQL / PostgreSQL / 达梦 这类有字典表的产品应覆写成一条 SQL（见各自驱动），
+         * 把 ER 图的加载从「几十秒」压到「一两秒」。
+         *
+         * @param session 会话上下文，包含 catalog 和 schema 过滤条件
+         * @return 主键与外键总览（可能为空，但不为 {@code null}）
+         */
+        public TableRelations getTableRelations(Session session)
+        {
+                TableRelations relations = new TableRelations();
+
+                for (Table table : getTables(session)) {
+                        String name = table.getName();
+
+                        try {
+                                for (String column : getPrimaryKeys(session, name))
+                                        relations.addPrimaryKey(name, column);
+
+                                for (ForeignKey key : getForeignKeys(session, name))
+                                        relations.addForeignKey(name, key);
+                        } catch (Exception ignored) {
+                                /* 单表读元数据失败不影响整张 ER 图 */
+                        }
+                }
+
+                return relations;
+        }
+
+        /**
+         * ER 图用：一次取回某个库 / 模式下所有表的字段（只要名字 / 类型 / 是否非空）。
+         * <p>
+         * 默认复用 {@link #getTableColumns(Session)}；产品那边的字段注释视图很慢时
+         * （例如达梦），可以覆写成不带注释的字典表查询——注释只影响补全提示，
+         * 图本身用不上。
+         *
+         * @param session 会话上下文，包含 catalog 和 schema 过滤条件
+         * @return 表名 → 字段列表
+         */
+        public Map<String, List<Column>> getDiagramColumns(Session session)
+        {
+                return getTableColumns(session);
         }
 
         /**

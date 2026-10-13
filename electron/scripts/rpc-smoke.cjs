@@ -121,6 +121,36 @@ async function main() {
       });
 
       console.log("数据表:", tables.nodes.map(node => node.label).join(", ") || "(无)");
+
+      /*
+       * ER 图：临时建一对有外键的表，验证 schema.relations 能拿到
+       * 表 / 列 / 主键 / 外键（走 JDBC 元数据，各产品通用）。
+       */
+      await bridge.call("query.execute", {
+        sessionId: opened.sessionId,
+        sql: [
+          "CREATE TABLE er_parent (id INTEGER PRIMARY KEY, name TEXT)",
+          "CREATE TABLE er_child (id INTEGER PRIMARY KEY, parent_id INTEGER, FOREIGN KEY (parent_id) REFERENCES er_parent (id))"
+        ].join(";\n")
+      });
+
+      const relations = await bridge.call("schema.relations", {
+        sessionId: opened.sessionId,
+        nodeId: container.id
+      });
+      const parent = relations.tables.find(table => table.name === "er_parent");
+      const child = relations.tables.find(table => table.name === "er_child");
+      const foreignKey = child?.foreignKeys?.[0];
+
+      console.log("ER 图:",
+        `${relations.tables.length} 张表`,
+        `| er_parent 主键 ${JSON.stringify(parent?.primaryKeys)}`,
+        `| 外键 ${foreignKey?.columns?.join(",")} → ${foreignKey?.refTable}(${foreignKey?.refColumns?.join(",")})`);
+
+      await bridge.call("query.execute", {
+        sessionId: opened.sessionId,
+        sql: "DROP TABLE er_child;\nDROP TABLE er_parent"
+      });
     }
   }
 

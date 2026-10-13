@@ -242,7 +242,7 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
     const tabs = tabsApi.tabs;
     const targetSession = openSessions[target] ?? (session?.name === target ? session : null);
     const closingTabs = tabs.filter(tab =>
-      (tab.kind === "data" || tab.kind === "design") && tab.connection === target
+      (tab.kind === "data" || tab.kind === "design" || tab.kind === "er") && tab.connection === target
       || tab.kind === "objects"
       || (tab.kind === "query" && tab.path.connection === target));
     const unsaved = closingTabs.filter(tab => hasUnsaved(tab, resolveSql));
@@ -278,7 +278,7 @@ export function useConnectionSessions(deps: ConnectionSessionsDeps) {
 
     /* 关掉这个连接的数据页 / 设计页 / 对象页；查询控制台只清结果，保留 SQL */
     const remaining = tabs
-      .filter(tab => !((tab.kind === "data" || tab.kind === "design") && tab.connection === target))
+      .filter(tab => !((tab.kind === "data" || tab.kind === "design" || tab.kind === "er") && tab.connection === target))
       .filter(tab => !(tab.kind === "objects" && tab.connection === target))
       .map(tab => tab.kind === "query" && tab.path.connection === target
         ? { ...tab, result: null, plan: null, messages: [], logs: [], lastCost: null, running: false, path: {} } as WorkTab

@@ -1,5 +1,5 @@
 import type { SchemaNode } from "../api";
-import type { ObjectTab, QueryTab, WorkTab, AutomationTab } from "../app/appTypes";
+import type { ErTab, ObjectTab, QueryTab, WorkTab, AutomationTab } from "../app/appTypes";
 import { DEFAULT_SQL } from "../app/appConstants";
 import { graphSignature, nextNodeId } from "../automation/core";
 import type { WorkflowGraph } from "../automation/sdk";
@@ -48,6 +48,19 @@ export function newAutomationTab(): AutomationTab {
   };
 }
 
+/** 新的 ER 图标签：内容跟着容器节点（库 / 模式）走 */
+export function newErTab(node: SchemaNode, connection?: string): ErTab {
+  return {
+    id: nextTabId(),
+    kind: "er" as const,
+    title: `ER 图 · ${node.label}`,
+    running: false,
+    messages: [],
+    connection,
+    node
+  };
+}
+
 /** 自动化画布相对上次保存有没有改动 */
 export function isAutomationDirty(tab: WorkTab): boolean {
   return tab.kind === "workflow" && tab.savedSignature != null && tab.savedSignature !== graphSignature(tab.graph);
@@ -63,6 +76,9 @@ export function tabIconName(tab: WorkTab): string {
 
   if (tab.kind === "data")
     return "table";
+
+  if (tab.kind === "er")
+    return "er";
 
   if (tab.kind === "objects")
     return tab.view === "scripts" ? "code" : "list";
@@ -81,6 +97,9 @@ export function connectionOfTab(tab: WorkTab | null | undefined): string | undef
   if (tab.kind === "data" || tab.kind === "design" || tab.kind === "objects")
     return tab.connection;
 
+  if (tab.kind === "er")
+    return tab.connection;
+
   return undefined;
 }
 
@@ -93,7 +112,7 @@ export function treeNodeOfTab(tab: WorkTab | null | undefined, treeChildren: Rec
   if (!tab)
     return null;
 
-  if (tab.kind === "data" || tab.kind === "design")
+  if (tab.kind === "data" || tab.kind === "design" || tab.kind === "er")
     return tab.node ?? null;
 
   if (tab.kind === "objects")
@@ -122,7 +141,7 @@ export function findObjectTab(tabs: WorkTab[]): ObjectTab | null {
  * 查询控制台与常驻的「对象」页不受影响。
  */
 export function affectsTabOnNodeClose(tab: WorkTab, node: SchemaNode): boolean {
-  if (tab.kind !== "data" && tab.kind !== "design")
+  if (tab.kind !== "data" && tab.kind !== "design" && tab.kind !== "er")
     return false;
 
   const target = tab.node;
@@ -256,6 +275,8 @@ export function tabKindLabel(kind: WorkTab["kind"] | undefined): string {
       return "数据浏览";
     case "design":
       return "表结构";
+    case "er":
+      return "ER 图";
     case "objects":
       return "对象列表";
     case "workflow":

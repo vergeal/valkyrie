@@ -10,15 +10,21 @@ import valkyrie.driver.suggestion.Suggestion;
 import valkyrie.utils.Captor;
 import valkyrie.utils.collection.Lists;
 import valkyrie.utils.collection.Sets;
-
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.util.Collection;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
 
 import static valkyrie.utils.TypeConverter.atobool;
 import static valkyrie.utils.TypeConverter.atos;
@@ -33,6 +39,25 @@ import static valkyrie.utils.string.StrStaticImports.*;
 @SuppressWarnings("SqlSourceToSinkFlow")
 public class DMDriver extends Driver
 {
+        /*
+         * 达梦字典视图一次扫描要好几秒，主键与外键两条并行能省一半时间。
+         * 这里用自己的小线程池，而不是公共 ThreadPool：公共池里可能已经有任务在等
+         * 自己提交的子任务，嵌套等待会把池子占死（踩过一次，界面直接卡住）。
+         */
+        private static final ExecutorService DIAGRAM_POOL = Executors.newFixedThreadPool(2, new ThreadFactory()
+        {
+                private int sequence;
+
+                @Override
+                public Thread newThread(Runnable runnable)
+                {
+                        Thread thread = new Thread(runnable, "dm-metadata-" + (++sequence));
+
+                        thread.setDaemon(true);
+                        return thread;
+                }
+        });
+
         public DMDriver(VkDataSource dataSource)
         {
                 super(dataSource);
@@ -175,6 +200,142 @@ public class DMDriver extends Driver
                 }
 
                 return tables;
+        }
+
+        /**
+         * ER 图专用：只读字段名 / 类型 / 是否非空，不碰注释。
+         * <p>
+         * 达梦的 {@code ALL_COL_COMMENTS} 单查一次要 4 秒（JDBC 的 getColumns 会带上它），
+         * 而 ER 图不需要注释，所以这里直接用 {@code ALL_TAB_COLUMNS}。
+         */
+        @Override
+        public Map<String, List<Column>> getDiagramColumns(Session session)
+        {
+                Map<String, List<Column>> columns = new LinkedHashMap<>();
+
+                QueryResult result = execute(session, """
+                        SELECT
+                          T.TABLE_NAME AS TABLE_NAME,
+                          T.COLUMN_NAME AS COLUMN_NAME,
+                          T.DATA_TYPE AS DATA_TYPE,
+                          T.NULLABLE AS NULLABLE
+                        FROM
+                          ALL_TAB_COLUMNS T
+                        WHERE
+                          T.OWNER = '%s'
+                        ORDER BY
+                          T.TABLE_NAME, T.COLUMN_ID
+                        ;
+                        """, session.schema());
+
+                for (int i = 0; i < result.size(); i++) {
+                        Column column = new Column();
+                        column.setName(result.getRowValue(i, "COLUMN_NAME"));
+                        column.setType(result.getRowValue(i, "DATA_TYPE"));
+                        column.setNotNull("N".equals(result.getRowValue(i, "NULLABLE")));
+
+                        columns.computeIfAbsent(result.getRowValue(i, "TABLE_NAME"), key -> Lists.newArrayList())
+                                .add(column);
+                }
+
+                return columns;
+        }
+
+        /**
+         * ER 图：一条 SQL 取回当前模式下的主键，另一条取回外键。
+         * <p>
+         * 达梦是 Oracle 兼容字典：{@code USER_CONSTRAINTS} + {@code USER_CONS_COLUMNS}，
+         * 外键靠 {@code R_CONSTRAINT_NAME} 找回被引用的主键字段。逐表读 JDBC 元数据
+         * 在远端库上要几十秒，这里两次往返就够。
+         */
+        @Override
+        public TableRelations getTableRelations(Session session)
+        {
+                TableRelations relations = new TableRelations();
+
+                /*
+                 * 达梦的字典视图一次扫描要好几秒，主键与外键两条分别查的话就是两倍；
+                 * 两条互不依赖，放到线程池里同时跑。
+                 */
+                Future<QueryResult> primaryTask = DIAGRAM_POOL.submit(() -> execute(session, """
+                        SELECT
+                          C.TABLE_NAME AS TABLE_NAME,
+                          CC.COLUMN_NAME AS COLUMN_NAME
+                        FROM
+                          ALL_CONSTRAINTS C
+                          JOIN ALL_CONS_COLUMNS CC
+                            ON CC.OWNER = C.OWNER
+                           AND CC.CONSTRAINT_NAME = C.CONSTRAINT_NAME
+                           AND CC.TABLE_NAME = C.TABLE_NAME
+                        WHERE
+                          C.CONSTRAINT_TYPE = 'P'
+                          AND C.OWNER = '%s'
+                        ORDER BY
+                          C.TABLE_NAME, CC.POSITION
+                        ;
+                        """, session.schema()));
+
+                Future<QueryResult> foreignTask = DIAGRAM_POOL.submit(() -> execute(session, """
+                        SELECT
+                          C.TABLE_NAME AS TABLE_NAME,
+                          C.CONSTRAINT_NAME AS CONSTRAINT_NAME,
+                          CC.COLUMN_NAME AS COLUMN_NAME,
+                          RC.TABLE_NAME AS REF_TABLE,
+                          RC.OWNER AS REF_OWNER,
+                          RCC.COLUMN_NAME AS REF_COLUMN
+                        FROM
+                          ALL_CONSTRAINTS C
+                          JOIN ALL_CONSTRAINTS RC
+                            ON RC.OWNER = C.R_OWNER
+                           AND RC.CONSTRAINT_NAME = C.R_CONSTRAINT_NAME
+                          JOIN ALL_CONS_COLUMNS CC
+                            ON CC.OWNER = C.OWNER
+                           AND CC.CONSTRAINT_NAME = C.CONSTRAINT_NAME
+                           AND CC.TABLE_NAME = C.TABLE_NAME
+                          JOIN ALL_CONS_COLUMNS RCC
+                            ON RCC.OWNER = RC.OWNER
+                           AND RCC.CONSTRAINT_NAME = RC.CONSTRAINT_NAME
+                           AND RCC.TABLE_NAME = RC.TABLE_NAME
+                           AND RCC.POSITION = CC.POSITION
+                        WHERE
+                          C.CONSTRAINT_TYPE = 'R'
+                          AND C.OWNER = '%s'
+                        ORDER BY
+                          C.TABLE_NAME, C.CONSTRAINT_NAME, CC.POSITION
+                        ;
+                        """, session.schema()));
+
+                QueryResult primary = await(primaryTask);
+                QueryResult foreign = await(foreignTask);
+
+                for (int i = 0; i < primary.size(); i++)
+                        relations.addPrimaryKey(
+                                primary.getRowValue(i, "TABLE_NAME"),
+                                primary.getRowValue(i, "COLUMN_NAME"));
+
+                for (int i = 0; i < foreign.size(); i++)
+                        relations.addForeignKey(
+                                foreign.getRowValue(i, "TABLE_NAME"),
+                                foreign.getRowValue(i, "CONSTRAINT_NAME"),
+                                foreign.getRowValue(i, "COLUMN_NAME"),
+                                foreign.getRowValue(i, "REF_TABLE"),
+                                foreign.getRowValue(i, "REF_COLUMN"),
+                                null, foreign.getRowValue(i, "REF_OWNER"));
+
+                return relations;
+        }
+
+        /** 取并发查询结果：失败按驱动异常抛出，避免半张图悄悄少数据 */
+        private static QueryResult await(Future<QueryResult> task)
+        {
+                try {
+                        return task.get();
+                } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new DriverException(e);
+                } catch (ExecutionException e) {
+                        throw new DriverException(e.getCause() == null ? e : e.getCause());
+                }
         }
 
         @Override

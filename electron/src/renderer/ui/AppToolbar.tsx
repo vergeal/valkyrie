@@ -11,11 +11,13 @@ export function AppToolbar(props: {
   onNewWorkflow: () => void;
   onOpenTableList: () => void;
   onOpenScriptList: () => void;
+  /** ER 图：按当前对象所在的库 / 模式画表关系 */
+  onOpenErDiagram: () => void;
   onCycleTheme: () => void;
 }) {
   const {
     canOpenTableList, pageSize, themeLabel, themeIcon,
-    onNewConnection, onNewQuery, onNewWorkflow, onOpenTableList, onOpenScriptList, onCycleTheme
+    onNewConnection, onNewQuery, onNewWorkflow, onOpenTableList, onOpenScriptList, onOpenErDiagram, onCycleTheme
   } = props;
 
   return (
@@ -52,6 +54,15 @@ export function AppToolbar(props: {
         onClick={onOpenScriptList}
       >
         <Icon name="code" />脚本
+      </button>
+      <button
+        type="button"
+        className="tbtn"
+        disabled={!canOpenTableList}
+        title="ER 图：画出当前库 / 模式下的表与表关系"
+        onClick={onOpenErDiagram}
+      >
+        <Icon name="er" />ER 图
       </button>
       <span className="tbtn-push" aria-hidden="true" />
       <span className="toolbar-text">行数限制 {pageSize}</span>

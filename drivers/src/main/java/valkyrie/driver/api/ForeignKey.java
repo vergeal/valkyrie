@@ -26,6 +26,16 @@ public class ForeignKey
         private List<String> columns;
 
         /**
+         * 引用表所在库（跨库引用时用于区分同名表，可能为 {@code null}）
+         */
+        private String refCatalog;
+
+        /**
+         * 引用表所在模式（跨模式引用时用于区分同名表，可能为 {@code null}）
+         */
+        private String refSchema;
+
+        /**
          * 引用的表名
          */
         private String refTable;

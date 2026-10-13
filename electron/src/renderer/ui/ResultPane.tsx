@@ -1,5 +1,5 @@
 import type { QueryColumn, QueryResultPayload, SchemaNode, ScriptFile } from "../api";
-import type { ResultPane as ResultPaneKind, WorkTab } from "../app/appTypes";
+import type { ErTab, ResultPane as ResultPaneKind, SessionState, WorkTab } from "../app/appTypes";
 import type { GridSelection } from "../result/resultHelpers";
 import type { AppSettings } from "../settings";
 import { ResultGrid } from "./ResultGrid";
@@ -7,6 +7,7 @@ import { PlanPane } from "./PlanPane";
 import { TableList } from "./TableList";
 import { ScriptList } from "./ScriptList";
 import { TableDesign, type DesignColumn, type DesignIndex } from "./TableDesign";
+import { ErDiagram } from "../schema/ErDiagram";
 import { LogConsole, type LogRecord } from "./LogConsole";
 import { Icon } from "./icons";
 
@@ -61,6 +62,10 @@ export function ResultPane(props: {
   onSaveDesign: (columns: DesignColumn[], indexes: DesignIndex[]) => void;
   onReloadDesign: () => void;
   onApplyDdl: (ddl: string) => void;
+  /** ER 图所属会话（没连上时为空，图里会提示先连库） */
+  erSession: SessionState | null;
+  onStatus: (message: string) => void;
+  onError: (message: string | null) => void;
   logs: LogRecord[];
   setLogs: (records: LogRecord[]) => void;
   copyText: (text: string) => void;
@@ -75,7 +80,8 @@ export function ResultPane(props: {
     setGridHits, setGridSelection, onCellCommit, onExport, onExplain, onGridContextMenu,
     tableFilter, listFlash, tableSelection, setTableSelection, setActiveNode, onOpenTable, onTableContextMenu,
     scriptFilter, scriptFlash, scriptSelection, setScriptSelection, onOpenScript, onScriptContextMenu,
-    askConfirm, onSaveDesign, onReloadDesign, onApplyDdl, logs, setLogs, copyText, selectAllToken
+    askConfirm, onSaveDesign, onReloadDesign, onApplyDdl, erSession, onStatus, onError,
+    logs, setLogs, copyText, selectAllToken
   } = props;
 
   return (
@@ -303,7 +309,17 @@ export function ResultPane(props: {
           />
         )}
 
-        {resultPane === "grid" && !pageTab && activeTab?.kind !== "design" && (
+        {/* ER 图：整块区域给画布，不参与结果集 / 计划那套面板 */}
+        {activeTab?.kind === "er" && (
+          <ErDiagram
+            tab={activeTab as ErTab}
+            session={erSession}
+            onStatus={onStatus}
+            onError={onError}
+          />
+        )}
+
+        {resultPane === "grid" && !pageTab && activeTab?.kind !== "design" && activeTab?.kind !== "er" && (
           <div className="grid-host">
             <ResultGrid
               columns={columns}

@@ -5,7 +5,7 @@ import {
   writeClipboard,
   type SchemaNode
 } from "./api";
-import type { QueryTab, ResultPane, SessionState, WorkTab } from "./app/appTypes";
+import type { ErTab, QueryTab, ResultPane, SessionState, WorkTab } from "./app/appTypes";
 import { NEXT_THEME, THEME_ICON, THEME_LABEL } from "./app/appConstants";
 import { useAppSettings } from "./app/useAppSettings";
 import { useAppTheme } from "./app/useAppTheme";
@@ -32,6 +32,7 @@ import {
 import {
   connectionOfTab,
   moveTabInList,
+  newErTab,
   newQueryTab,
   tabIconName,
   tabKindLabel,
@@ -376,6 +377,21 @@ export function App() {
   /* 自动化按脚本路径打开：用 ref 取最新版本（openScriptFile 归 useObjectPage 维护） */
   const openScriptFileRef = useRef(openScriptFile);
   openScriptFileRef.current = openScriptFile;
+
+  /** 打开 ER 图：同一个容器已经有图就切过去，不重复开 */
+  function openErDiagram(node: SchemaNode) {
+    const existing = tabs.find((tab): tab is ErTab => tab.kind === "er" && tab.node.id === node.id);
+
+    if (existing) {
+      setActiveTabId(existing.id);
+      return;
+    }
+
+    const tab = newErTab(node, connectionOfNode(node));
+
+    setTabs(previous => [...previous, tab]);
+    setActiveTabId(tab.id);
+  }
 
   /* 关闭连接后清空工作区相关状态（对象页 / 网格 / 信息面板 / 日志等） */
   function clearUiOnDisconnect() {
@@ -735,6 +751,10 @@ export function App() {
     if (activeTab.kind === "objects")
       return [];
 
+    /* ER 图是画布，也没有结果集 */
+    if (activeTab.kind === "er")
+      return [];
+
     /* 自动化工作流是画布，没有结果集 */
     if (activeTab.kind === "workflow")
       return [];
@@ -817,7 +837,7 @@ export function App() {
   });
 
   /* 对象列是整页列表：结果集那一套面板（消息 / 执行计划 / 日志）在这里不出现 */
-  const pageTab = activeTab?.kind === "objects";
+  const pageTab = activeTab?.kind === "objects" || activeTab?.kind === "er";
   /* 自动化 tab 自带「节点属性 + 运行记录」侧栏，全局对象信息面板对它没有意义，直接收起 */
   const isAutomation = activeTab?.kind === "workflow";
 
@@ -825,6 +845,15 @@ export function App() {
 
 
   const currentConnection = connections.find(item => item.name === session?.name) ?? null;
+
+  /** 顶部工具栏「ER 图」画哪个库 / 模式：优先当前选中的容器，其次活动连接的库 */
+  function erContainerNode(): SchemaNode | null {
+    const isContainer = (node: SchemaNode | null | undefined) =>
+      node?.kind === "CATALOG" || node?.kind === "SCHEMA";
+
+    return [activeNode, ...catalogOptions, ...schemaOptions, ...roots]
+      .find((node): node is SchemaNode => Boolean(node) && isContainer(node)) ?? null;
+  }
 
   /* 菜单构建需要的状态与动作：集中组装成 MenuContext，交给 menus 模块构建菜单 */
   const menuContext: MenuContext = {
@@ -835,6 +864,7 @@ export function App() {
     createQueryTab, openAllConnections, closeAllConnections, refreshConnections,
     disconnect, deleteConnection, toggleNode, refreshNode, refreshObjectList, openTableList,
     createTableDraft, exportTableSql, exportDatabaseSql, openTableData, openTableDesign,
+    openErDiagram,
     copyDdl, clearTable, dropTable, dropTables,
     openScript, renameScript, deleteScript, openScriptList, createScript, openScriptFile,
     deleteScriptFiles, renameScriptFile, saveActiveScript,
@@ -889,6 +919,12 @@ export function App() {
         onNewWorkflow={createAutomationTab}
         onOpenTableList={() => session && void openTableList(activeNode ?? roots[0])}
         onOpenScriptList={() => void openScriptList()}
+        onOpenErDiagram={() => {
+          const target = erContainerNode();
+
+          if (target)
+            openErDiagram(target);
+        }}
         onCycleTheme={() => setTheme(NEXT_THEME[theme])}
       />
 
@@ -1095,6 +1131,9 @@ export function App() {
                 onSaveDesign={(cols, indexes) => activeTab?.kind === "design" && void saveTableDesign(activeTab.id, activeTab.node, cols, indexes)}
                 onReloadDesign={() => activeTab?.kind === "design" && void loadDesign(activeTab.id, activeTab.node)}
                 onApplyDdl={ddl => activeTab?.kind === "design" && void applyTableDdl(activeTab.id, activeTab.node, ddl)}
+                erSession={activeTab?.kind === "er" ? sessionByName(activeTab.connection) ?? session : null}
+                onStatus={setStatus}
+                onError={setError}
                 logs={activeTab?.logs ?? []}
                 setLogs={records => activeTab && updateTab(activeTab.id, { logs: records })}
                 copyText={copyText}

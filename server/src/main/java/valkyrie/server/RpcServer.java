@@ -23,6 +23,7 @@ import valkyrie.driver.api.QueryResult;
 import valkyrie.driver.api.SQLExecuteCallback;
 import valkyrie.driver.api.Session;
 import valkyrie.driver.api.Table;
+import valkyrie.driver.api.TableRelations;
 import valkyrie.driver.api.node.DBNode;
 import valkyrie.driver.api.node.DBCatalogNode;
 import valkyrie.driver.api.node.DBColumnNode;
@@ -40,6 +41,7 @@ import valkyrie.driver.suggestion.Suggestion;
 import valkyrie.driver.suggestion.SuggestionEngine;
 import valkyrie.utils.exception.Causes;
 import valkyrie.utils.poi.WorkBook;
+import valkyrie.utils.thread.ThreadPool;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -63,6 +65,7 @@ import java.util.Deque;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -84,6 +87,9 @@ import java.util.concurrent.atomic.AtomicLong;
 public class RpcServer
 {
         private static final Logger LOG = LoggerFactory.getLogger(RpcServer.class);
+
+        /** ER 图最多画多少张表：再大就不是「看关系」而是「看不动」了，多余的截断并告知界面 */
+        private static final int ER_TABLE_LIMIT = 400;
 
         private final PrintStream out;
         private final Object writeLock = new Object();
@@ -167,6 +173,7 @@ public class RpcServer
                         case "connection.close" -> closeConnection(params);
                         case "schema.children" -> schemaChildren(params);
                         case "schema.roots" -> schemaRoots(params);
+                        case "schema.relations" -> schemaRelations(params);
                         case "table.page" -> tablePage(params);
                         case "table.columns" -> tableColumns(params);
                         case "table.indexes" -> tableIndexes(params);
@@ -416,6 +423,128 @@ public class RpcServer
                 JSONObject ret = new JSONObject();
                 ret.put("nodes", nodes);
                 return ret;
+        }
+
+        /**
+         * ER 图：把容器（连接 / 库 / 模式 / 表容器）下的表、字段、主键与外键一次报给界面。
+         * <p>
+         * 表节点是各产品自己建的层级，这里只做通用遍历；列 / 主键 / 外键都走驱动层的默认实现，
+         * MySQL / PostgreSQL / SQLite / 达梦 因此共用同一套逻辑，不需要按产品写分支。
+         * 单表读元数据失败只跳过这张表，不让整张图打不开。
+         */
+        private Object schemaRelations(JSONObject params)
+        {
+                OpenConnection session = require(params.getString("sessionId"));
+                DBNode node = session.nodes.get(params.getString("nodeId"));
+
+                if (node == null)
+                        throw new IllegalArgumentException("节点不存在: " + params.getString("nodeId"));
+
+                List<DBTableNode> tables = new ArrayList<>();
+                boolean truncated = collectTableNodes(node, tables);
+
+                /*
+                 * 列与主键 / 外键都按「库 / 模式」批量读一次，并且两者并发：
+                 * 逐表读元数据在远端库上几百张表就是几百次往返（达梦实测 50 秒），
+                 * 批量化 + 并发之后只剩两三条 SQL 的耗时。
+                 */
+                Map<String, Map<String, List<Column>>> columnCache = new LinkedHashMap<>();
+                Map<String, TableRelations> relationCache = new LinkedHashMap<>();
+                JSONArray jsonTables = new JSONArray();
+
+                for (DBTableNode tableNode : tables) {
+                        Table table = tableNode.getTable();
+                        Driver driver = tableNode.getDriver();
+                        Session context = tableNode.getSession();
+                        String name = table.getName();
+
+                        JSONObject item = new JSONObject();
+                        item.put("name", name);
+                        item.put("catalog", context.catalog());
+                        item.put("schema", context.schema());
+
+                        JSONArray columns = new JSONArray();
+                        JSONArray primaryKeys = new JSONArray();
+                        JSONArray foreignKeys = new JSONArray();
+
+                        try {
+                                String cacheKey = Objects.toString(context.catalog(), "")
+                                        + "\u0001" + Objects.toString(context.schema(), "");
+
+                                Map<String, List<Column>> cached = columnCache.get(cacheKey);
+                                TableRelations relations = relationCache.get(cacheKey);
+
+                                if (cached == null || relations == null) {
+                                        Future<Map<String, List<Column>>> columnTask =
+                                                ThreadPool.taskSubmit(() -> driver.getDiagramColumns(context));
+                                        Future<TableRelations> relationTask =
+                                                ThreadPool.taskSubmit(() -> driver.getTableRelations(context));
+
+                                        cached = await(columnTask);
+                                        relations = await(relationTask);
+                                        columnCache.put(cacheKey, cached);
+                                        relationCache.put(cacheKey, relations);
+                                }
+
+                                for (Column column : cached.getOrDefault(name, List.of()))
+                                        columns.add(columnJson(column));
+
+                                primaryKeys.addAll(relations.getPrimaryKeys().getOrDefault(name, List.of()));
+
+                                for (ForeignKey key : relations.getForeignKeys().getOrDefault(name, List.of()))
+                                        foreignKeys.add(foreignKeyJson(key));
+                        } catch (Exception e) {
+                                LOG.warn("读表 {} 的字段 / 主键 / 外键失败: {}", name, e.getMessage());
+                        }
+
+                        item.put("columns", columns);
+                        item.put("primaryKeys", primaryKeys);
+                        item.put("foreignKeys", foreignKeys);
+                        jsonTables.add(item);
+                }
+
+                JSONObject ret = new JSONObject();
+                ret.put("tables", jsonTables);
+                ret.put("truncated", truncated);
+                return ret;
+        }
+
+        /** 取并发元数据查询结果，失败直接向上抛（外层按表兜底提示） */
+        private static <T> T await(Future<T> task) throws Exception
+        {
+                try {
+                        return task.get();
+                } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw e;
+                } catch (java.util.concurrent.ExecutionException e) {
+                        throw e.getCause() instanceof Exception cause ? cause : e;
+                }
+        }
+
+        /**
+         * 递归收集表节点：库 / 模式下面挂的就是表，表节点本身不再往下钻（它的子节点是字段 / 索引 / 外键明细）。
+         *
+         * @return 是否因为数量达到上限而截断
+         */
+        private boolean collectTableNodes(DBNode node, List<DBTableNode> tables)
+        {
+                if (tables.size() >= ER_TABLE_LIMIT)
+                        return true;
+
+                if (node instanceof DBTableNode tableNode) {
+                        tables.add(tableNode);
+                        return false;
+                }
+
+                if (!node.hasChildren())
+                        return false;
+
+                for (DBNode child : node.getChildren())
+                        if (collectTableNodes(child, tables))
+                                return true;
+
+                return false;
         }
 
         /**
@@ -1001,6 +1130,19 @@ public class RpcServer
                 json.put("columnsText", index.getColumnsText());
                 json.put("type", index.getType());
                 json.put("visible", index.isVisible());
+                return json;
+        }
+
+        /** 外键：ER 图连线与「外键」明细共用 */
+        private JSONObject foreignKeyJson(ForeignKey foreignKey)
+        {
+                JSONObject json = new JSONObject();
+                json.put("name", foreignKey.getName());
+                json.put("columns", foreignKey.getColumns());
+                json.put("refCatalog", foreignKey.getRefCatalog());
+                json.put("refSchema", foreignKey.getRefSchema());
+                json.put("refTable", foreignKey.getRefTable());
+                json.put("refColumns", foreignKey.getRefColumns());
                 return json;
         }
 

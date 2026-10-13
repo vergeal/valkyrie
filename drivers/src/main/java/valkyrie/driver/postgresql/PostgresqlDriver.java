@@ -309,6 +309,59 @@ public class PostgresqlDriver extends Driver
                 return ret;
         }
 
+        /**
+         * ER 图：一条 SQL 取回当前模式下的主键与外键。
+         * <p>
+         * {@code pg_constraint} 里主键（contype = 'p'）和外键（contype = 'f'）都在，
+         * 字段顺序用 {@code WITH ORDINALITY} 展开 conkey / confkey 对齐。
+         */
+        @Override
+        public TableRelations getTableRelations(Session session)
+        {
+                TableRelations relations = new TableRelations();
+
+                QueryResult result = execute(session, """
+                        SELECT
+                          cl.relname AS table_name,
+                          con.conname AS constraint_name,
+                          con.contype AS constraint_type,
+                          att.attname AS column_name,
+                          fcl.relname AS ref_table,
+                          fns.nspname AS ref_schema,
+                          fatt.attname AS ref_column
+                        FROM pg_constraint con
+                        JOIN pg_class cl ON cl.oid = con.conrelid
+                        JOIN pg_namespace ns ON ns.oid = cl.relnamespace
+                        JOIN unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord) ON true
+                        JOIN pg_attribute att
+                          ON att.attrelid = con.conrelid AND att.attnum = k.attnum
+                        LEFT JOIN pg_class fcl ON fcl.oid = con.confrelid
+                        LEFT JOIN pg_namespace fns ON fns.oid = fcl.relnamespace
+                        LEFT JOIN unnest(con.confkey) WITH ORDINALITY AS fk(attnum, ord) ON fk.ord = k.ord
+                        LEFT JOIN pg_attribute fatt
+                          ON fatt.attrelid = con.confrelid AND fatt.attnum = fk.attnum
+                        WHERE con.contype IN ('p', 'f')
+                          AND ns.nspname = '%s'
+                        ORDER BY cl.relname, con.conname, k.ord;
+                        """, session.schema());
+
+                for (int i = 0; i < result.size(); i++) {
+                        String table = result.getRowValue(i, "table_name");
+                        String column = result.getRowValue(i, "column_name");
+
+                        if ("p".equals(result.getRowValue(i, "constraint_type"))) {
+                                relations.addPrimaryKey(table, column);
+                                continue;
+                        }
+
+                        relations.addForeignKey(table, result.getRowValue(i, "constraint_name"), column,
+                                result.getRowValue(i, "ref_table"), result.getRowValue(i, "ref_column"),
+                                null, result.getRowValue(i, "ref_schema"));
+                }
+
+                return relations;
+        }
+
         @Override
         @SuppressWarnings("ExtractMethodRecommender")
         public List<Index> getIndexes(Session session, String table)

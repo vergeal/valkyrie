@@ -169,6 +169,28 @@ export interface OpenConnectionPayload {
   nodes: SchemaNode[];
 }
 
+/** ER 图里的一张表：字段 + 主键 + 外键 */
+export interface ErTable {
+  name: string;
+  catalog?: string | null;
+  schema?: string | null;
+  columns: { name: string; type?: string; notNull?: boolean; comment?: string }[];
+  primaryKeys: string[];
+  foreignKeys: {
+    name: string;
+    columns: string[];
+    refCatalog?: string | null;
+    refSchema?: string | null;
+    refTable: string;
+    refColumns: string[];
+  }[];
+}
+
+/** ER 图数据：容器（库 / 模式 / 表容器）下的表、字段、主键与外键，一次取回 */
+export function schemaRelations(sessionId: string, nodeId: string): Promise<{ tables: ErTable[]; truncated: boolean }> {
+  return invoke<{ tables: ErTable[]; truncated: boolean }>("schema.relations", { sessionId, nodeId });
+}
+
 export interface ProgressEvent {
   channel: string;
   sessionId?: string;

@@ -54,6 +54,8 @@ export interface MenuContext {
   exportDatabaseSql: (node: SchemaNode, withData: boolean) => void;
   openTableData: (node: SchemaNode) => void;
   openTableDesign: (node: SchemaNode) => void;
+  /** 打开 ER 图（按库 / 模式画表关系） */
+  openErDiagram: (node: SchemaNode) => void;
   copyDdl: (node: SchemaNode) => void;
   clearTable: (node: SchemaNode) => void;
   dropTable: (node: SchemaNode) => void;
@@ -163,6 +165,7 @@ export function buildContextMenu(node: SchemaNode, ctx: MenuContext): MenuEntry[
       { label: open ? "关闭数据库" : "打开数据库", action: () => void ctx.toggleNode(node) },
       { label: "表列表", action: () => void ctx.openTableList(node) },
       { label: "新建表…", action: () => void ctx.createTableDraft(node.label) },
+      { label: "ER 图", icon: "er", action: () => ctx.openErDiagram(node) },
       { label: "新建查询", action: ctx.createQueryTab },
       { separator: true },
       { label: "导出表结构", action: () => void ctx.exportDatabaseSql(node, false) },
@@ -178,6 +181,7 @@ export function buildContextMenu(node: SchemaNode, ctx: MenuContext): MenuEntry[
       { label: open ? "收起模式" : "展开模式", action: () => void ctx.toggleNode(node) },
       { label: "表列表", action: () => void ctx.openTableList(node) },
       { label: "新建表…", action: () => void ctx.createTableDraft(node.label) },
+      { label: "ER 图", icon: "er", action: () => ctx.openErDiagram(node) },
       { label: "新建查询", action: ctx.createQueryTab },
       { separator: true },
       { label: "导出表结构", action: () => void ctx.exportDatabaseSql(node, false) },
@@ -193,6 +197,7 @@ export function buildContextMenu(node: SchemaNode, ctx: MenuContext): MenuEntry[
       { label: open ? "收起列表" : "展开列表", action: () => void ctx.toggleNode(node) },
       { label: "表列表", action: () => void ctx.openTableList(node) },
       { label: "新建表…", action: () => void ctx.createTableDraft(node.catalog) },
+      { label: "ER 图", icon: "er", action: () => ctx.openErDiagram(node) },
       { label: "刷新列表", action: () => void ctx.refreshObjectList(node) },
       { label: "新建查询", action: ctx.createQueryTab }
     ];
