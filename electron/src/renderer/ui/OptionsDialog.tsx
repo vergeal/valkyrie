@@ -247,6 +247,16 @@ export function OptionsDialog(props: OptionsDialogProps) {
         pick("logLimit", "日志最多保留条数", "超出后丢弃最早的记录", String(settings.logLimit),
           LOG_LIMIT_OPTIONS.map(value => ({ value: String(value), label: `${value} 条` })), "log 日志 条数")
       ]
+    },
+    {
+      id: "automation",
+      label: "自动化",
+      icon: "workflow",
+      rows: [
+        check("automationSnap", "卡片拖动对齐磁吸",
+          "拖动工作流卡片时，和其它卡片的边 / 中线对齐并显示辅助线（默认关闭）",
+          "自动化 工作流 磁吸 吸附 对齐 辅助线 snap align")
+      ]
     }
   ], [settings, theme, onChange, onThemeChange, systemFonts]);
 

@@ -164,6 +164,8 @@ export interface AppSettings {
   pageSize: number;
   /** 日志最多保留条数 */
   logLimit: number;
+  /** 自动化画布：拖动卡片时和其它卡片对齐磁吸（默认关闭） */
+  automationSnap: boolean;
   /** 启动时最大化窗口 */
   startMaximized: boolean;
 }
@@ -187,6 +189,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   gridHeaderType: true,
   pageSize: 200,
   logLimit: 2048,
+  automationSnap: false,
   startMaximized: true
 };
 

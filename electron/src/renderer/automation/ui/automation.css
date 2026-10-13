@@ -121,6 +121,17 @@
 .am-canvas .react-flow__edge.selected .react-flow__edge-path,
 .am-canvas .react-flow__edge:hover .react-flow__edge-path { stroke: var(--accent); }
 
+/* 拖动磁吸的对齐辅助线：屏幕坐标，线宽固定 1px */
+.am-guide {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  background: var(--accent);
+}
+
+.am-guide.is-vertical { width: 1px; }
+.am-guide.is-horizontal { height: 1px; }
+
 .am-side {
   flex: none;
   width: 280px;
@@ -166,6 +177,23 @@
   background: rgba(0, 0, 0, .25);
   font-size: 10.5px;
 }
+
+.am-node-run {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--field);
+  font-size: 11.5px;
+}
+
+.am-node-run.is-success { color: var(--green); }
+.am-node-run.is-failed { color: var(--red); }
+.am-node-run.is-running { color: var(--accent); }
+.am-node-run.is-cancelled { color: var(--muted); }
+
+.am-node-run-time { margin-left: auto; color: var(--muted); }
 
 .am-node-body { padding: 10px 12px; }
 

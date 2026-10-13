@@ -90,6 +90,8 @@ export interface NodeManifest {
   risk?: NodeRisk;
   /** 触发器节点：可作为工作流入入口 */
   trigger?: boolean;
+  /** 终端节点（如「结束」）：运行记录可在此查看 */
+  terminal?: boolean;
   /** 纯数据节点：无 exec 线，可被数据线按需求值 */
   pure?: boolean;
 }

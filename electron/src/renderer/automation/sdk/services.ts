@@ -106,6 +106,16 @@ export interface OpenTabOptions {
   sql?: string;
 }
 
+export interface OpenScriptOptions {
+  /** 脚本所属连接 */
+  connection: string;
+  /** 脚本所在目录（库或模式名） */
+  scope: string;
+  name: string;
+  /** 打开后是否立即执行 */
+  run?: boolean;
+}
+
 /** 让自动化直接操作客户端的连接会话与查询标签页，结果留在界面供人工查看/复制 */
 export interface WorkspaceService {
   listConnections(): ConnectionInfo[];
@@ -113,6 +123,10 @@ export interface WorkspaceService {
   openConnection(name: string): Promise<void>;
   closeConnection(name: string): Promise<void>;
   listDatabases(connection: string): Promise<DatabaseInfo[]>;
+  /** 读取本地保存的查询脚本内容（脚本库里的 .sql） */
+  readScript(connection: string, scope: string, name: string): Promise<string>;
+  /** 打开本地脚本成查询页（连接/库/模式按脚本路径推断），可选打开后执行 */
+  openScript(options: OpenScriptOptions): Promise<void>;
   openTab(options: OpenTabOptions): string;
   setTabSql(tabId: string, sql: string, activate?: boolean): void;
   runTab(tabId: string): Promise<void>;

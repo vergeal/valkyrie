@@ -23,3 +23,4 @@ export {
   type RunLog
 } from "./run";
 export { ERROR_POLICY_FIELDS, readErrorPolicy, type ErrorPolicy } from "./commonConfig";
+export { resolveNodeContext, type HandleContext } from "./resolveContext";

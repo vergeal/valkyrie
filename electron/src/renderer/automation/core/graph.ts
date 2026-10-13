@@ -39,8 +39,8 @@ export function graphSignature(graph: WorkflowGraph | null | undefined): string 
 
 export interface GraphIndex {
   nodes: Map<string, WorkflowGraphNode>;
-  /** `${nodeId}:${handle}` → 目标节点 id（exec 线） */
-  execOutgoing: Map<string, string>;
+  /** `${nodeId}:${handle}` → 目标节点 id 列表（exec 线，一个输出可扇出到多个节点做并行） */
+  execOutgoing: Map<string, string[]>;
   /** `${nodeId}:${portId}` → { nodeId, handle }（data 线） */
   dataIncoming: Map<string, { nodeId: string; handle: string }>;
   triggers: string[];
@@ -48,7 +48,7 @@ export interface GraphIndex {
 
 export function indexGraph(graph: WorkflowGraph, registry: NodeRegistry): GraphIndex {
   const nodes = new Map(graph.nodes.map(node => [node.id, node]));
-  const execOutgoing = new Map<string, string>();
+  const execOutgoing = new Map<string, string[]>();
   const dataIncoming = new Map<string, { nodeId: string; handle: string }>();
   const triggers: string[] = [];
 
@@ -71,10 +71,19 @@ export function indexGraph(graph: WorkflowGraph, registry: NodeRegistry): GraphI
     /* 端口定义优先；找不到定义时退回命名约定 */
     const isExec = port ? port.kind === "exec" : handle === "" || handle.startsWith("exec") || handle.startsWith("out-");
 
-    if (isExec)
-      execOutgoing.set(`${edge.source}:${handle}`, edge.target);
-    else
+    if (isExec) {
+      const key = `${edge.source}:${handle}`;
+      const list = execOutgoing.get(key);
+
+      if (list) {
+        if (!list.includes(edge.target))
+          list.push(edge.target);
+      } else {
+        execOutgoing.set(key, [edge.target]);
+      }
+    } else {
       dataIncoming.set(`${edge.target}:${edge.targetHandle ?? ""}`, { nodeId: edge.source, handle });
+    }
   }
 
   return { nodes, execOutgoing, dataIncoming, triggers };
@@ -159,8 +168,9 @@ export function cloneGraph(graph: WorkflowGraph): WorkflowGraph {
   return JSON.parse(JSON.stringify(graph)) as WorkflowGraph;
 }
 
-export function edgeTarget(index: GraphIndex, nodeId: string, handle: string): string | undefined {
-  return index.execOutgoing.get(`${nodeId}:${handle}`);
+/** 某个 exec 出口连到的所有节点（可扇出到多个，用于并行） */
+export function edgeTargets(index: GraphIndex, nodeId: string, handle: string): string[] {
+  return index.execOutgoing.get(`${nodeId}:${handle}`) ?? [];
 }
 
 export type { NodeDefinition, WorkflowGraph, WorkflowGraphEdge, WorkflowGraphNode };

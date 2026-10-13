@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  invoke,
   revealPath,
   writeClipboard,
   type SchemaNode
@@ -190,6 +191,9 @@ export function App() {
   const updateTabRef = useRef(updateTab);
   /* 自动化刚建的查询页：同一拍就要执行，React 状态还没落地，用这个同步映射兜住 */
   const automationTabsRef = useRef<Map<string, QueryTab>>(new Map());
+  /* 运行中的工作流：编辑器把「叫停」登记进来，标签被真正关掉时由这里触发（切标签不停） */
+  const automationStopsRef = useRef(new Map<string, () => void>());
+  const workflowTabIdsRef = useRef(new Set<string>());
   /* 打开脚本后按需执行：执行域建好后回填，供对象页 / 对象树复用（Ctrl/Cmd 双击脚本） */
   const runScriptRef = useRef<(tabId: string, sql: string, context?: QueryTab["path"]) => Promise<void>>(async () => undefined);
 
@@ -229,6 +233,25 @@ export function App() {
   useEffect(() => {
     setInfoFocus(activeTabObjectNode ? "tab" : "tree");
   }, [activeTabId, activeTabObjectNode]);
+
+  /*
+   * 工作流标签被关掉 → 停下它正在跑的工作流。
+   * 之所以盯标签列表而不是在编辑器卸载时处理：工作流自己打开查询页会把活动标签切走，
+   * 编辑器那时就已经卸载了，切标签并不代表要停。
+   */
+  useEffect(() => {
+    const alive = new Set(tabs.filter(tab => tab.kind === "workflow").map(tab => tab.id));
+
+    for (const id of workflowTabIdsRef.current) {
+      if (alive.has(id))
+        continue;
+
+      automationStopsRef.current.get(id)?.();
+      automationStopsRef.current.delete(id);
+    }
+
+    workflowTabIdsRef.current = alive;
+  }, [tabs]);
 
   /* Schema 域：对象树缓存 / 载入 / 展开 / 刷新，以及结构信息（列 / 索引） */
   const schema = useSchemaTree({
@@ -350,6 +373,10 @@ export function App() {
     openScriptList, refreshScriptList, saveActiveScript
   } = objects;
 
+  /* 自动化按脚本路径打开：用 ref 取最新版本（openScriptFile 归 useObjectPage 维护） */
+  const openScriptFileRef = useRef(openScriptFile);
+  openScriptFileRef.current = openScriptFile;
+
   /* 关闭连接后清空工作区相关状态（对象页 / 网格 / 信息面板 / 日志等） */
   function clearUiOnDisconnect() {
     setResultPane("grid");
@@ -402,7 +429,16 @@ export function App() {
    * 否则"没开标签时编辑器收起"会被存下来，之后打开查询就恢复成被压缩的高度。
    */
   const columnsLayout = useDefaultLayout({
-    id: "valkyrie.layout.columns",
+    id: "valkyrie.layout.columns-v2",
+    storage: window.localStorage,
+    onlySaveAfterUserInteractions: true
+  });
+  /*
+   * 「查询区 / 对象信息」单独成组：对象信息收起（自动化 tab / 手动隐藏）时只在这组里重分宽度，
+   * 不会把它的份额摊给组外的「对象导航」，切换标签时左侧宽度因此保持不动。
+   */
+  const workColumnsLayout = useDefaultLayout({
+    id: "valkyrie.layout.work-columns-v1",
     storage: window.localStorage,
     onlySaveAfterUserInteractions: true
   });
@@ -591,10 +627,16 @@ export function App() {
    * 自动化「工作区服务」：让工作流直接驱动客户端的连接与查询页，
    * 结果留在界面供人工查看 / 复制。方法内统一走 ref 读最新状态，适配器本身保持稳定。
    */
-  const automationWorkspace = useMemo<WorkspaceService>(() => ({
-    listConnections: () => connectionsRef.current.map(item => ({ name: item.name, type: item.type })),
-    listOpenConnections: () => Object.keys(openSessionsRef.current),
-    openConnection: async name => {
+  const automationWorkspace = useMemo<WorkspaceService>(() => {
+    /*
+     * 打开连接后等会话真正写进 React 状态再返回：
+     * 自动化常在「打开连接 → 打开脚本 / 执行」很近的时序里跑，若不等状态落地，
+     * runQuery / openScript 按会话名查不到会话，就会漏掉后续动作。
+     */
+    const ensureConnectionOpen = async (name: string): Promise<void> => {
+      if (openSessionsRef.current[name])
+        return;
+
       const config = connectionsRef.current.find(item => item.name === name);
 
       if (!config)
@@ -604,12 +646,49 @@ export function App() {
 
       if (!opened)
         throw new Error(`连接「${name}」打开失败`);
-    },
-    closeConnection: async name => {
-      await disconnectRef.current(name, { confirmed: true });
-    },
-    listDatabases: async connection =>
-      (rootsByConnectionRef.current[connection] ?? []).map(node => ({ label: node.label, kind: node.kind })),
+
+      for (let i = 0; i < 100 && !openSessionsRef.current[name]; i++)
+        await new Promise(resolve => setTimeout(resolve, 20));
+
+      if (!openSessionsRef.current[name])
+        throw new Error(`连接「${name}」打开超时`);
+    };
+
+    return {
+      listConnections: () => connectionsRef.current.map(item => ({ name: item.name, type: item.type })),
+      listOpenConnections: () => Object.keys(openSessionsRef.current),
+      openConnection: ensureConnectionOpen,
+      closeConnection: async name => {
+        await disconnectRef.current(name, { confirmed: true });
+      },
+      listDatabases: async connection =>
+        (rootsByConnectionRef.current[connection] ?? []).map(node => ({ label: node.label, kind: node.kind })),
+      readScript: async (connection, scope, name) => {
+        const payload = await invoke<{ content: string }>("queryFiles.read", { connection, catalog: scope, name });
+
+        return payload.content;
+      },
+      openScript: async options => {
+        /* 已经打开过这个脚本：直接激活（并在需要时执行），不重复开页 */
+        const opened = workspaceTabsRef.current.find((tab): tab is QueryTab =>
+          tab.kind === "query" && tab.script?.name === options.name
+          && tab.script?.connection === options.connection && tab.script?.catalog === options.scope);
+
+        if (opened) {
+          setActiveTabId(opened.id);
+
+          if (options.run)
+            await runScriptRef.current(opened.id, opened.sql, opened.path);
+
+          return;
+        }
+
+        await ensureConnectionOpen(options.connection);
+        await openScriptFileRef.current(
+          { connection: options.connection, scope: options.scope, name: options.name },
+          options.run ?? false
+        );
+      },
     openTab: options => openWorkspaceTab(options),
     setTabSql: (tabId, sql, activate) => {
       updateTabRef.current(tabId, { sql });
@@ -638,8 +717,9 @@ export function App() {
         catalog: item.path.catalog,
         schema: item.path.schema
       }))
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), []);
+  }, []);
 
 
   /* ------------------------------ 视图派生数据 ------------------------------ */
@@ -843,6 +923,15 @@ export function App() {
         <Separator className="splitter splitter-v splitter-side" aria-label="调整对象树宽度" />
 
         <Panel id="work" className="work-panel" minSize="30%">
+        {/* 工作区内部再分「查询区 / 对象信息」两栏：对象信息收起只影响这一组，见 workColumnsLayout */}
+        <Group
+          orientation="horizontal"
+          id="valkyrie-work-columns"
+          defaultLayout={workColumnsLayout.defaultLayout}
+          onLayoutChanged={workColumnsLayout.onLayoutChanged}
+          className="work-columns"
+        >
+        <Panel id="main" className="work-main-panel" defaultSize="75%" minSize="35%">
         <main
           className="work-main"
           /* 在工作区里操作（网格 / 工具条等）→ 信息主体跟着当前数据 / 设计页 */
@@ -1021,6 +1110,8 @@ export function App() {
               tab={activeTab}
               connections={connections}
               workspace={automationWorkspace}
+              registerStop={stop => automationStopsRef.current.set(activeTab.id, stop)}
+              snapEnabled={settings.automationSnap}
               onChange={patch => updateTab(activeTab.id, patch)}
               onStatus={setStatus}
               onError={setError}
@@ -1031,7 +1122,7 @@ export function App() {
 
         <Separator className="splitter splitter-v splitter-info" aria-label="调整对象信息宽度" />
 
-        <Panel id="info" className="info-panel" defaultSize="19%" minSize="12%" maxSize="30%">
+        <Panel id="info" className="info-panel" defaultSize="25%" minSize="16%" maxSize="39%">
           {activeTab?.kind === "query" && resultPane === "plan" ? (
             <PlanInfoPanel
               plan={activeTab.plan}
@@ -1050,6 +1141,8 @@ export function App() {
               onDesign={openTableDesign}
             />
           )}
+        </Panel>
+        </Group>
         </Panel>
       </Group>
 
@@ -1097,4 +1190,3 @@ export function App() {
     </div>
   );
 }
-

@@ -1,19 +1,21 @@
-import { defineNode, execIn, execOut } from "../sdk";
+import { dataOut, defineNode, execIn, execOut } from "../sdk";
 
 export default defineNode({
   manifest: {
     type: "open-connection",
     title: "打开连接",
-    category: "数据库",
+    category: "连接",
     version: 1,
     icon: "plug",
-    color: "#7c3aed",
-    description: "为本次运行建立一条独立连接，可脱离界面当前会话",
-    requires: ["database"],
+    color: "#0d9488",
+    description: "在界面上打开连接（已打开则复用），并输出连接句柄供后续节点使用",
+    requires: ["workspace"],
     risk: "read",
     inputs: [execIn()],
-    outputs: [execOut()],
-    config: [{ key: "connection", label: "连接", type: "connection", required: true, optionsSource: "connections", inline: true }]
+    outputs: [execOut(), dataOut("connection", "连接句柄", "connection")],
+    config: [
+      { key: "connection", label: "连接", type: "connection", required: true, optionsSource: "connections", inline: true }
+    ]
   },
   execute: async ({ ctx, config }) => {
     const connection = String(config.connection ?? "").trim();
@@ -21,11 +23,11 @@ export default defineNode({
     if (!connection)
       throw new Error("打开连接：未选择连接");
 
-    if (!ctx.services.database.isOpen(connection)) {
-      await ctx.services.database.open(connection);
+    if (!ctx.services.workspace.listOpenConnections().includes(connection)) {
+      await ctx.services.workspace.openConnection(connection);
       ctx.logger.log("info", `已打开连接「${connection}」`);
     }
 
-    return {};
+    return { outputs: { connection } };
   }
 });

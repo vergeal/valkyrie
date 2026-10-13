@@ -1,4 +1,12 @@
 import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignHorizontalDistributeCenter,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  AlignVerticalDistributeCenter,
   ArrowDownToLine,
   Calendar,
   CalendarClock,
@@ -82,6 +90,14 @@ export function SheetIcon({ size = 14, className }: { size?: number; className?:
  * 图标名到 Lucide 组件的映射，保持调用方只依赖语义名。
  */
 const ICONS: Record<string, ComponentType<{ size?: number; className?: string; strokeWidth?: number }>> = {
+  alignLeft: AlignStartVertical,
+  alignCenterH: AlignCenterVertical,
+  alignRight: AlignEndVertical,
+  alignTop: AlignStartHorizontal,
+  alignCenterV: AlignCenterHorizontal,
+  alignBottom: AlignEndHorizontal,
+  distributeH: AlignHorizontalDistributeCenter,
+  distributeV: AlignVerticalDistributeCenter,
   database: Database,
   table: SheetIcon,
   /* 导出用：Excel 沿用表格那个绿色图标，CSV 用文本文件图标 */

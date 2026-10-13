@@ -3,7 +3,7 @@ import { defineNode, execOut } from "../sdk";
 export default defineNode({
   manifest: {
     type: "manual-start",
-    title: "手动触发",
+    title: "开始",
     category: "触发器",
     version: 1,
     icon: "play",

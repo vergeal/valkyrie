@@ -11,7 +11,7 @@ import type {
   WorkflowGraphNode
 } from "../sdk";
 import { NodeRegistry } from "./registry";
-import { edgeTarget, findTrigger, indexGraph, type GraphIndex } from "./graph";
+import { edgeTargets, findTrigger, indexGraph, type GraphIndex } from "./graph";
 import { readErrorPolicy } from "./commonConfig";
 import { createRunRecord, type RunRecord, type RunStatus } from "./run";
 
@@ -43,11 +43,10 @@ export interface RunOptions {
   onUpdate?: (run: RunRecord) => void;
 }
 
-interface ErrorFrame {
+interface ErrorHandler {
   token: number;
   nodeId: string;
   handle: string;
-  stackLength: number;
 }
 
 let runSequence = 0;
@@ -109,6 +108,9 @@ function normalizeNext(result: ExecResult | void, definition: NodeDefinition): s
 /**
  * 工作流执行引擎。核心只做通用事情：exec 遍历、数据求值、变量、错误、重试、取消、运行记录。
  * 任何节点语义都通过 registry 查到的 executor 完成，引擎里没有节点类型的 switch。
+ *
+ * 遍历是「递归 + 并行」：一个节点的每个 exec 出口若连到多个后继，这些后继会并行执行
+ * （例如「开始」同时连多个节点）。线性链路自然就是顺序的。
  */
 export class WorkflowEngine {
   constructor(private registry: NodeRegistry, private services: NodeServices) {}
@@ -137,11 +139,10 @@ export class WorkflowEngine {
       variables.set(key, value);
 
     const outputs = new Map<string, Record<string, unknown>>();
-    const errorFrames: ErrorFrame[] = [];
-    const stack: string[] = [trigger.id];
+    /* 控制流节点注册的错误处理出口（try/catch 之类），后进先出 */
+    const errorHandlers: ErrorHandler[] = [];
     let logSequence = 0;
     let tokenSequence = 0;
-    let currentNodeId = trigger.id;
 
     const log = (level: "debug" | "info" | "warn" | "error", message: string, nodeId?: string) => {
       logSequence += 1;
@@ -150,31 +151,33 @@ export class WorkflowEngine {
       emit();
     };
 
-    const flow: FlowHooks = {
-      pushErrorHandler: (handle: string) => {
-        tokenSequence += 1;
-        errorFrames.push({ token: tokenSequence, nodeId: currentNodeId, handle, stackLength: stack.length });
-        return tokenSequence;
-      },
-      popErrorHandler: (token: number) => {
-        const at = errorFrames.findIndex(frame => frame.token === token);
+    const makeContext = (nodeId: string): NodeContext => {
+      const flow: FlowHooks = {
+        pushErrorHandler: (handle: string) => {
+          tokenSequence += 1;
+          errorHandlers.push({ token: tokenSequence, nodeId, handle });
+          return tokenSequence;
+        },
+        popErrorHandler: (token: number) => {
+          const at = errorHandlers.findIndex(handler => handler.token === token);
 
-        if (at >= 0)
-          errorFrames.splice(at, 1);
-      },
-      variables,
-      sleep: (ms, signal) => sleep(ms, signal)
+          if (at >= 0)
+            errorHandlers.splice(at, 1);
+        },
+        variables,
+        sleep: (ms, signal) => sleep(ms, signal)
+      };
+
+      return {
+        runId: run.id,
+        graph,
+        nodeId,
+        signal: options.signal,
+        services: this.services,
+        logger: { log: (level, message) => log(level, message, nodeId) },
+        flow
+      };
     };
-
-    const makeContext = (nodeId: string): NodeContext => ({
-      runId: run.id,
-      graph,
-      nodeId,
-      signal: options.signal,
-      services: this.services,
-      logger: { log: (level, message) => log(level, message, nodeId) },
-      flow
-    });
 
     const resolveInputs = async (node: WorkflowGraphNode, evaluating: Set<string>): Promise<ExecInputs> => {
       const definition = this.registry.get(node.type);
@@ -248,22 +251,36 @@ export class WorkflowEngine {
       }
     };
 
-    while (stack.length > 0) {
-      if (options.signal.aborted) {
-        finish("cancelled");
-        return run;
-      }
+    /* 执行一个出口连到的所有后继（并行） */
+    const runNext = async (nodeId: string, definition: NodeDefinition, result: ExecResult | void): Promise<void> => {
+      const targets = new Set<string>();
 
-      const nodeId = stack.pop() as string;
+      for (const handle of normalizeNext(result, definition))
+        for (const target of edgeTargets(index, nodeId, handle))
+          targets.add(target);
+
+      await Promise.all([...targets].map(target => runFrom(target)));
+    };
+
+    const runFrom = async (nodeId: string): Promise<void> => {
       const node = index.nodes.get(nodeId);
       const definition = node ? this.registry.get(node.type) : undefined;
 
-      if (!node || !definition) {
-        log("error", `节点不存在或类型未注册：${nodeId}`);
-        continue;
+      /* 工作流已取消：后面的节点不再执行，但要记一笔，避免看起来「什么都没发生」 */
+      if (options.signal.aborted) {
+        if (node && definition) {
+          run.nodes[nodeId] = { nodeId, type: node.type, title: definition.manifest.title, status: "skipped" };
+          log("warn", `工作流已停止，跳过「${definition.manifest.title}」`, nodeId);
+        }
+
+        return;
       }
 
-      currentNodeId = nodeId;
+      if (!node || !definition) {
+        log("error", `节点不存在或类型未注册：${nodeId}`);
+        return;
+      }
+
       run.nodes[nodeId] = {
         nodeId,
         type: node.type,
@@ -273,66 +290,58 @@ export class WorkflowEngine {
       };
       emit();
 
+      let result: ExecResult | void;
+
       try {
-        const result = await executeNode(node);
-
-        outputs.set(nodeId, result?.outputs ?? {});
-        run.nodes[nodeId] = {
-          ...run.nodes[nodeId],
-          status: "success",
-          finishedAt: Date.now(),
-          outputs: result?.outputs
-        };
-        emit();
-
-        for (const handle of normalizeNext(result, definition)) {
-          const target = edgeTarget(index, nodeId, handle);
-
-          if (target)
-            stack.push(target);
-        }
+        result = await executeNode(node);
       } catch (error) {
         const message = messageOf(error);
 
         run.nodes[nodeId] = { ...run.nodes[nodeId], status: "failed", finishedAt: Date.now(), error: message };
         log("error", message, nodeId);
 
-        const frame = errorFrames.pop();
+        /* 有控制流错误处理出口就转过去，否则按节点的出错策略处理 */
+        const handler = errorHandlers.pop();
 
-        if (frame) {
-          if (stack.length > frame.stackLength)
-            stack.length = frame.stackLength;
-
+        if (handler) {
           variables.set("error", message);
 
-          const target = edgeTarget(index, frame.nodeId, frame.handle);
+          for (const target of edgeTargets(index, handler.nodeId, handler.handle))
+            await runFrom(target);
 
-          if (target)
-            stack.push(target);
-
-          continue;
+          return;
         }
 
         const config = { ...configDefaults(definition), ...node.config };
 
         if (readErrorPolicy(config).onError === "continue") {
-          for (const handle of normalizeNext(undefined, definition)) {
-            const target = edgeTarget(index, nodeId, handle);
-
-            if (target)
-              stack.push(target);
-          }
-
-          continue;
+          await runNext(nodeId, definition, undefined);
+          return;
         }
 
-        run.error = message;
-        finish("failed");
-        return run;
+        throw error;
       }
+
+      outputs.set(nodeId, result?.outputs ?? {});
+      run.nodes[nodeId] = {
+        ...run.nodes[nodeId],
+        status: "success",
+        finishedAt: Date.now(),
+        outputs: result?.outputs
+      };
+      emit();
+
+      await runNext(nodeId, definition, result);
+    };
+
+    try {
+      await runFrom(trigger.id);
+      finish(options.signal.aborted ? "cancelled" : "success");
+    } catch (error) {
+      run.error = messageOf(error);
+      finish("failed");
     }
 
-    finish("success");
     return run;
   }
 

@@ -1,8 +1,31 @@
 import { Handle, Position, type NodeProps } from "reactflow";
 import type { ConfigField, ConfigOption, PortDefinition } from "../sdk";
+import type { RunRecord, RunStatus } from "../core";
 import { renderControl } from "./controls";
 import { useAutomation } from "./context";
 import type { AutomationNodeData } from "./flowAdapter";
+import { Icon } from "../../ui/icons";
+
+const RUN_ICON: Record<RunStatus, string> = {
+  running: "refresh",
+  success: "ok",
+  failed: "fail",
+  cancelled: "stop"
+};
+
+const RUN_LABEL: Record<RunStatus, string> = {
+  running: "运行中",
+  success: "成功",
+  failed: "失败",
+  cancelled: "已停止"
+};
+
+function runDuration(run: RunRecord): string {
+  const end = run.finishedAt ?? Date.now();
+  const ms = Math.max(0, end - run.startedAt);
+
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+}
 
 function handleClass(port: PortDefinition): string {
   if (port.kind === "exec")
@@ -32,7 +55,7 @@ function handleClass(port: PortDefinition): string {
 }
 
 export function AutomationNodeView({ id, data, selected }: NodeProps<AutomationNodeData>) {
-  const { registry, options, setConfigValue } = useAutomation();
+  const { registry, options, scriptOptions, run, setConfigValue } = useAutomation();
   const definition = registry.get(data.nodeType);
 
   if (!definition)
@@ -41,8 +64,12 @@ export function AutomationNodeView({ id, data, selected }: NodeProps<AutomationN
   const manifest = definition.manifest;
   const config = data.config;
 
-  const optionsFor = (field: ConfigField): ConfigOption[] =>
-    field.optionsSource ? options[field.optionsSource] ?? [] : field.options ?? [];
+  const optionsFor = (field: ConfigField): ConfigOption[] => {
+    if (field.optionsSource === "scripts")
+      return scriptOptions[id] ?? [];
+
+    return field.optionsSource ? options[field.optionsSource] ?? [] : field.options ?? [];
+  };
 
   const renderPort = (port: PortDefinition) => (
     <div key={port.id} className={`am-port am-port-${port.direction}`}>
@@ -67,6 +94,14 @@ export function AutomationNodeView({ id, data, selected }: NodeProps<AutomationN
         <span className="am-node-title">{manifest.title}</span>
         {manifest.risk === "destructive" && <span className="am-node-risk">危险</span>}
       </div>
+
+      {(manifest.trigger || manifest.terminal) && run && (
+        <div className={`am-node-run is-${run.status}`} title={run.error ?? ""}>
+          <Icon name={RUN_ICON[run.status]} size={12} />
+          <span>{RUN_LABEL[run.status]}</span>
+          <span className="am-node-run-time">{runDuration(run)}</span>
+        </div>
+      )}
 
       <div className="am-node-body">
         <div className="am-node-columns">

@@ -1,41 +1,48 @@
-import { dataOut, defineNode, execIn, execOut } from "../sdk";
+import { dataIn, defineNode, execIn, execOut } from "../sdk";
+import { catalogOf, connectionNameOf, schemaOf } from "../sdk";
 
 export default defineNode({
   manifest: {
     type: "execute-sql",
     title: "执行 SQL",
-    category: "数据库",
+    category: "脚本",
     version: 1,
-    icon: "code",
-    color: "#7c3aed",
-    description: "执行 DML / DDL，输出受影响行数",
-    requires: ["database"],
+    icon: "play",
+    color: "#0d9488",
+    description: "执行手写的 SQL：自动新建查询页，设置连接 / 数据库 / 模式后执行",
+    requires: ["workspace"],
     risk: "write",
-    inputs: [execIn()],
-    outputs: [execOut(), dataOut("affected", "影响行数", "int")],
+    inputs: [
+      execIn(),
+      dataIn("connection", "连接", "connection"),
+      dataIn("database", "数据库", "database"),
+      dataIn("schema", "模式", "object")
+    ],
+    outputs: [execOut()],
     config: [
-      { key: "connection", label: "连接", type: "connection", required: true, optionsSource: "connections", inline: true },
-      { key: "sql", label: "SQL", type: "code", language: "sql", required: true, inline: true, rows: 4 }
+      { key: "sql", label: "SQL", type: "code", language: "sql", required: true, inline: true, rows: 5 },
+      { key: "title", label: "页签标题", type: "text", placeholder: "留空用默认" }
     ]
   },
-  execute: async ({ ctx, config }) => {
-    const connection = String(config.connection ?? "").trim();
+  execute: async ({ ctx, inputs, config }) => {
+    const connection = connectionNameOf(inputs.schema) ?? connectionNameOf(inputs.database) ?? connectionNameOf(inputs.connection);
+    const catalog = catalogOf(inputs.database) ?? catalogOf(inputs.schema);
+    const schema = schemaOf(inputs.schema);
     const sql = String(config.sql ?? "").trim();
+    const title = String(config.title ?? "").trim();
 
     if (!connection)
-      throw new Error("执行 SQL：未选择连接");
+      throw new Error("执行 SQL：缺少连接（请接入连接 / 模式句柄）");
 
     if (!sql)
       throw new Error("执行 SQL：SQL 不能为空");
 
-    if (!ctx.services.database.isOpen(connection))
-      throw new Error(`执行 SQL：连接「${connection}」尚未打开，请先接「打开连接」节点`);
+    if (!ctx.services.workspace.listOpenConnections().includes(connection))
+      await ctx.services.workspace.openConnection(connection);
 
-    const result = await ctx.services.database.execute(connection, sql);
-    const affected = result.affected ?? result.rowCount ?? 0;
+    const tabId = ctx.services.workspace.openTab({ connection, catalog, schema, title: title || undefined, sql });
+    await ctx.services.workspace.runTab(tabId);
 
-    ctx.logger.log("info", `受影响 ${affected} 行`);
-
-    return { outputs: { affected } };
+    return {};
   }
 });

@@ -270,6 +270,8 @@ input, textarea, .console, .pre-wrap { user-select: text; }
  * flex-grow 的份额，剩下的面板不会自动铺开。外层带内联 display:flex，必须用
  * !important 才盖得住。分隔条也按各自的 class 单独隐藏，别把没被隐藏那一侧的
  * 分隔条一起干掉。
+ * 对象信息面板在工作区那一组里（见 .work-columns），所以它收起时只有查询区变大，
+ * 对象导航所在的组不受影响。
  */
 .work-body.no-side [data-panel][id="side"],
 .work-body.no-side .splitter-side { display: none !important; }
@@ -345,7 +347,7 @@ input, textarea, .console, .pre-wrap { user-select: text; }
 }
 
 /* react-resizable-panels：面板容器与面板本体铺满分配到的空间 */
-.side-panel, .work-panel, .info-panel {
+.side-panel, .work-panel, .work-main-panel, .info-panel {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -355,6 +357,14 @@ input, textarea, .console, .pre-wrap { user-select: text; }
 .work-rows {
   display: flex;
   flex: 1;
+  min-height: 0;
+}
+
+/* 查询区 / 对象信息：同属工作区，对象信息收起只会让查询区变宽 */
+.work-columns {
+  display: flex;
+  flex: 1;
+  min-width: 0;
   min-height: 0;
 }
 

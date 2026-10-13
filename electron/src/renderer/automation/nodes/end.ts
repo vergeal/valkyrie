@@ -9,6 +9,7 @@ export default defineNode({
     icon: "stop",
     color: "#dc2626",
     description: "工作流终点",
+    terminal: true,
     inputs: [execIn("exec-in", "结束")],
     outputs: [],
     config: []

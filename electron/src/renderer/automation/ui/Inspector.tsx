@@ -1,12 +1,13 @@
 import type { Node } from "reactflow";
 import { ERROR_POLICY_FIELDS } from "../core";
+import type { ConfigField, ConfigOption } from "../sdk";
 import { Icon } from "../../ui/icons";
 import { renderControl } from "./controls";
 import { useAutomation } from "./context";
 import type { AutomationNodeData } from "./flowAdapter";
 
 export function Inspector({ node, onDelete }: { node: Node<AutomationNodeData> | null; onDelete: (id: string) => void }) {
-  const { registry, options, setConfigValue } = useAutomation();
+  const { registry, options, scriptOptions, setConfigValue } = useAutomation();
 
   if (!node) {
     return (
@@ -31,6 +32,13 @@ export function Inspector({ node, onDelete }: { node: Node<AutomationNodeData> |
   const manifest = definition.manifest;
   const fields = manifest.trigger || manifest.pure ? manifest.config : [...manifest.config, ...ERROR_POLICY_FIELDS];
 
+  const optionsFor = (field: ConfigField): ConfigOption[] => {
+    if (field.optionsSource === "scripts")
+      return scriptOptions[node.id] ?? [];
+
+    return field.optionsSource ? options[field.optionsSource] ?? [] : field.options ?? [];
+  };
+
   return (
     <aside className="am-inspector">
       <div className="am-inspector-head">
@@ -45,8 +53,7 @@ export function Inspector({ node, onDelete }: { node: Node<AutomationNodeData> |
       <div className="am-inspector-fields">
         {fields.length === 0 && <div className="am-empty">该节点无需配置</div>}
         {fields.map(field => {
-          const resolved = field.optionsSource ? options[field.optionsSource] ?? [] : field.options ?? [];
-          const control = renderControl(field, node.data.config[field.key], resolved, value => setConfigValue(node.id, field.key, value));
+          const control = renderControl(field, node.data.config[field.key], optionsFor(field), value => setConfigValue(node.id, field.key, value));
 
           return (
             <div className="am-field" key={field.key}>
