@@ -1,5 +1,5 @@
 import type { SavedConnection, SchemaNode, ScriptFile } from "../api";
-import { windowControl } from "../api";
+import { requestPaste, windowControl } from "../api";
 import type { SessionState, WorkTab } from "../app/appTypes";
 import type { ConnectionDialogState, MessageBoxState } from "../dialogs/useDialogs";
 import type { ThemeMode } from "../settings";
@@ -437,7 +437,21 @@ export function buildAppMenus(ctx: MenuContext): { label: string; items: MenuEnt
               document.execCommand?.("copy");
           }
         },
-        { label: "粘贴", accelerator: ACCEL.paste, action: () => ctx.editorRef.current?.trigger("menu", "editor.action.clipboardPasteAction", null) }
+        /*
+         * 粘贴不注册加速键：⌘/Ctrl+V 直接落到渲染层 —— 自动化画布要粘卡片、输入框要原生粘贴，
+         * 注册成菜单加速键的话这个组合键会被菜单吃掉，画布收不到。
+         */
+        {
+          label: "粘贴",
+          action: () => {
+            const focused = document.activeElement as HTMLElement | null;
+
+            if (focused?.closest?.(".editor"))
+              ctx.editorRef.current?.trigger("menu", "editor.action.clipboardPasteAction", null);
+            else
+              void requestPaste();
+          }
+        }
       ]
     },
     {

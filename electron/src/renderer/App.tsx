@@ -1112,6 +1112,8 @@ export function App() {
               workspace={automationWorkspace}
               registerStop={stop => automationStopsRef.current.set(activeTab.id, stop)}
               snapEnabled={settings.automationSnap}
+              askText={askText}
+              askConfirm={askConfirm}
               onChange={patch => updateTab(activeTab.id, patch)}
               onStatus={setStatus}
               onError={setError}

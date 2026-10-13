@@ -23,6 +23,10 @@ export const ACCEL = {
   copy: "CmdOrCtrl+C",
   cut: "CmdOrCtrl+X",
   paste: "CmdOrCtrl+V",
+  undo: "CmdOrCtrl+Z",
+  redo: "CmdOrCtrl+Shift+Z",
+  duplicate: "CmdOrCtrl+D",
+  fitView: "CmdOrCtrl+0",
   options: "CmdOrCtrl+,",
   space: "CmdOrCtrl+Space"
 };
@@ -62,5 +66,9 @@ export const KEY = {
   copy: acceleratorLabel(ACCEL.copy),
   cut: acceleratorLabel(ACCEL.cut),
   paste: acceleratorLabel(ACCEL.paste),
+  undo: acceleratorLabel(ACCEL.undo),
+  redo: acceleratorLabel(ACCEL.redo),
+  duplicate: acceleratorLabel(ACCEL.duplicate),
+  fitView: acceleratorLabel(ACCEL.fitView),
   space: acceleratorLabel(ACCEL.space)
 };

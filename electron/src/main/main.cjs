@@ -151,6 +151,7 @@ async function listSystemFontFamilies() {
  * 菜单栏：Windows / Linux 不需要浏览器默认菜单（里面的刷新、开发者工具等快捷键一并去掉），
  * macOS 则必须保留一份，否则 ⌘Q、⌘H 以及输入框里的 ⌘C / ⌘V 都会失效。
  * ⌘A 不注册成 selectAll role，改为转发给渲染层 —— 对象页 / 脚本页要全选表格里的行。
+ * ⌘Z / ⇧⌘Z / ⌘X 同样转发：自动化画布要拿它们撤销 / 重做 / 剪切卡片，渲染层里再按上下文回落。
  */function installApplicationMenu() {
   if (process.platform !== "darwin") {
     Menu.setApplicationMenu(null);
@@ -162,10 +163,22 @@ async function listSystemFontFamilies() {
     {
       label: "编辑",
       submenu: [
-        { role: "undo" },
-        { role: "redo" },
+        {
+          label: "撤销",
+          accelerator: "CommandOrControl+Z",
+          click: (_item, window) => window?.webContents.send("valkyrie:shortcut", "undo")
+        },
+        {
+          label: "重做",
+          accelerator: "CommandOrControl+Shift+Z",
+          click: (_item, window) => window?.webContents.send("valkyrie:shortcut", "redo")
+        },
         { type: "separator" },
-        { role: "cut" },
+        {
+          label: "剪切",
+          accelerator: "CommandOrControl+X",
+          click: (_item, window) => window?.webContents.send("valkyrie:shortcut", "cut")
+        },
         /*
          * 复制自己转发到渲染层：结果表有选区时复制成制表符分隔（粘 Excel 直接分格），
          * 编辑器 / 输入框里仍然按系统默认复制（渲染层会执行 execCommand("copy")）。
@@ -355,8 +368,9 @@ function registerIpc() {
       return fs.readdirSync(dir)
         .filter(file => file.toLowerCase().endsWith(".json"))
         .map(file => {
-          const stat = fs.statSync(path.join(dir, file));
-          return { name: file.slice(0, -5), modified: stat.mtimeMs, size: stat.size };
+          const full = path.join(dir, file);
+          const stat = fs.statSync(full);
+          return { name: file.slice(0, -5), path: full, modified: stat.mtimeMs, size: stat.size };
         })
         .sort((a, b) => b.modified - a.modified);
     } catch (error) {
@@ -652,12 +666,28 @@ function registerIpc() {
 
     const sender = event.sender;
 
-    /* 标准编辑动作必须用系统 role：否则输入框里的 ⌘Z / ⌘X 会失效 */
+    /*
+     * 撤销 / 重做 / 剪切改成转发给渲染层：自动化画布要拿它们撤销 / 重做 / 剪切卡片，
+     * 用 role 的话组合键会被菜单吃掉，渲染层收不到。渲染层再按焦点回落：
+     * 输入框 / 编辑器走系统编辑命令，画布走自己的动作。
+     */
     const editRoles = [
-      { role: "undo" },
-      { role: "redo" },
+      {
+        label: "撤销",
+        accelerator: "CommandOrControl+Z",
+        click: (_item, window) => window?.webContents.send("valkyrie:shortcut", "undo")
+      },
+      {
+        label: "重做",
+        accelerator: "CommandOrControl+Shift+Z",
+        click: (_item, window) => window?.webContents.send("valkyrie:shortcut", "redo")
+      },
       { type: "separator" },
-      { role: "cut" },
+      {
+        label: "剪切",
+        accelerator: "CommandOrControl+X",
+        click: (_item, window) => window?.webContents.send("valkyrie:shortcut", "cut")
+      },
       { type: "separator" }
     ];
 

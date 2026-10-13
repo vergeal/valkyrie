@@ -85,6 +85,9 @@ export function useQueryShortcuts(deps: QueryShortcutsDeps) {
 
   const selectAllRef = useRef<() => void>(() => undefined);
   selectAllRef.current = () => void selectAllInPage();
+  /* 自动化画布在前台：⌘Z / ⌘X 归它处理，这里不抢 */
+  const workflowActiveRef = useRef(false);
+  workflowActiveRef.current = activeTab?.kind === "workflow";
 
   /* 粘贴入口：输入框 / 编辑器 → 系统默认粘贴；结果表 → 批量粘贴 */
   const pasteRef = useRef<() => void>(() => undefined);
@@ -147,11 +150,36 @@ export function useQueryShortcuts(deps: QueryShortcutsDeps) {
 
     /* macOS 菜单栏把 ⌘C 转发过来：结果表有选区就复制成制表符分隔，否则走系统默认复制 */
     if (action === "copy") {
+      /* 自动化画布自己处理（复制卡片），别用空选区覆盖系统剪贴板 */
+      if (workflowActiveRef.current)
+        return;
+
       const focused = document.activeElement as HTMLElement | null;
       const typing = Boolean(focused?.closest?.("input, textarea, .editor"));
 
       if (typing || !gridCopyRef.current())
         document.execCommand?.("copy");
+    }
+
+    /*
+     * macOS 菜单栏把 ⌘Z / ⇧⌘Z / ⌘X 转发过来：
+     * 自动化画布自己处理（那边也订了这个通道），其余上下文回落到编辑器 / 输入框的默认行为。
+     */
+    if (action === "undo" || action === "redo" || action === "cut") {
+      if (workflowActiveRef.current)
+        return;
+
+      const focused = document.activeElement as HTMLElement | null;
+
+      if (focused?.closest?.("input, textarea, [contenteditable=true]")) {
+        document.execCommand?.(action);
+        return;
+      }
+
+      if (action === "cut")
+        editorRef.current?.trigger("keyboard", "editor.action.clipboardCutAction", null);
+      else
+        editorRef.current?.trigger("keyboard", action, null);
     }
   }), []);
 

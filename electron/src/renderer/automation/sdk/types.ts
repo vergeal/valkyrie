@@ -124,6 +124,8 @@ export interface WorkflowFileMeta {
   name: string;
   modified: number;
   size: number;
+  /** 文件绝对路径（「在文件夹中显示」用；老版本列表里可能没有） */
+  path?: string;
 }
 
 export interface WorkflowFile extends WorkflowFileMeta {

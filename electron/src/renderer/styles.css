@@ -2873,6 +2873,56 @@ table.design-table td { padding: 2px 6px; }
 .conn-table .is-ok { color: var(--green); }
 .conn-table .is-error { color: var(--red); max-width: 360px; }
 
+/*
+ * 工作流管理：窗口宽度保持原来的固定上限，只把「列」铺满整行 ——
+ * 丢掉末尾那个看不见的占位列，三列按比例分掉宽度，列右边就不会留空白。
+ */
+.workflow-manager {
+  width: min(680px, calc(100% - 48px));
+}
+
+.workflow-manager .table-list .table-filler {
+  display: none;
+}
+
+/* 三列按比例分掉整行宽度，列本身就是铺满的 */
+.workflow-manager .table-list {
+  table-layout: fixed;
+}
+
+.workflow-manager .table-list th:first-child,
+.workflow-manager .table-list td:first-child {
+  width: 60%;
+}
+
+.workflow-manager .table-list th:nth-child(2),
+.workflow-manager .table-list td:nth-child(2) {
+  width: 22%;
+}
+
+.workflow-manager .table-list th:nth-child(3),
+.workflow-manager .table-list td:nth-child(3) {
+  width: 18%;
+}
+
+/* 名称内容用一层 flex 包住：单元格是普通 table-cell，才能跟着整列一起铺满 */
+.workflow-manager .table-name-cell .table-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: none;
+}
+
+.workflow-manager .table-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-size: 11px;
+}
+
 /* 脚本对象页 */
 /* 列与列之间留出更多间距，名字 / 数据库 / 大小 / 日期不会挤在一起 */
 table.script-list th,
