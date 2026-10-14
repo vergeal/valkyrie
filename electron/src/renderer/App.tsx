@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   invoke,
+  messageOf,
   revealPath,
   writeClipboard,
   type SchemaNode
@@ -262,6 +263,7 @@ export function App() {
     openConnection, refreshConnectionRoots,
     showTableList: (node, options) => objectApiRef.current?.showTableList(node, options) ?? Promise.resolve(),
     refreshTableList: (tabId, container) => objectApiRef.current?.refreshTableList(tabId, container) ?? Promise.resolve(),
+    connectionFolders: settings.connectionFolders,
     setError, setStatus, flash
   });
   treeApiRef.current = schema;
@@ -377,6 +379,107 @@ export function App() {
   /* 自动化按脚本路径打开：用 ref 取最新版本（openScriptFile 归 useObjectPage 维护） */
   const openScriptFileRef = useRef(openScriptFile);
   openScriptFileRef.current = openScriptFile;
+
+  /* ------------------------------ 连接文件夹（对象导航归档） ------------------------------ */
+
+  /** 把连接挪到某个文件夹；folder 为 null 表示移出到根下 */
+  async function moveConnectionToFolder(name: string, folder: string | null) {
+    const connection = connectionsRef.current.find(item => item.name === name);
+
+    if (!connection)
+      return;
+
+    const target = folder ?? "";
+
+    if ((connection.group ?? "") === target)
+      return;
+
+    try {
+      await invoke("connections.save", { connection: { ...connection, group: target }, oldName: name });
+
+      /* 顺手把文件夹记进设置，空文件夹才不会被忘掉 */
+      if (target && !settings.connectionFolders.includes(target))
+        updateSettings({ connectionFolders: [...settings.connectionFolders, target] });
+
+      await refreshConnections();
+      setStatus(target ? `「${name}」已移到文件夹「${target}」` : `「${name}」已移出文件夹`);
+    } catch (error) {
+      setError(messageOf(error));
+    }
+  }
+
+  /** 新建连接文件夹（对象导航空白处 / 根节点右键） */
+  async function createConnectionFolder() {
+    const name = (await askText("新建文件夹", "新文件夹"))?.trim();
+
+    if (!name)
+      return;
+
+    if (settings.connectionFolders.includes(name)) {
+      setStatus(`文件夹「${name}」已存在`);
+      return;
+    }
+
+    updateSettings({ connectionFolders: [...settings.connectionFolders, name] });
+    setStatus(`已新建文件夹「${name}」，把连接拖进去即可归档`);
+  }
+
+  /** 重命名文件夹：文件夹本身在设置里，里面的连接要逐个改 group */
+  async function renameConnectionFolder(folder: string) {
+    const name = (await askText("重命名文件夹", folder))?.trim();
+
+    if (!name || name === folder)
+      return;
+
+    if (settings.connectionFolders.includes(name)) {
+      setError(`文件夹「${name}」已存在`);
+      return;
+    }
+
+    try {
+      for (const connection of connectionsRef.current.filter(item => (item.group ?? "") === folder))
+        await invoke("connections.save", { connection: { ...connection, group: name }, oldName: connection.name });
+
+      updateSettings({
+        connectionFolders: settings.connectionFolders.map(item => (item === folder ? name : item))
+      });
+      await refreshConnections();
+      setStatus(`文件夹已重命名为「${name}」`);
+    } catch (error) {
+      setError(messageOf(error));
+    }
+  }
+
+  /** 删除文件夹：里面的连接回到根下，不删连接 */
+  async function deleteConnectionFolder(folder: string) {
+    const inside = connectionsRef.current.filter(item => (item.group ?? "") === folder);
+    const confirmed = await askConfirm(
+      inside.length > 0
+        ? `删除文件夹「${folder}」？里面 ${inside.length} 个连接会移回「我的连接」，连接本身不会删除。`
+        : `删除空文件夹「${folder}」？`,
+      "删除文件夹"
+    );
+
+    if (!confirmed)
+      return;
+
+    try {
+      for (const connection of inside)
+        await invoke("connections.save", { connection: { ...connection, group: "" }, oldName: connection.name });
+
+      updateSettings({ connectionFolders: settings.connectionFolders.filter(item => item !== folder) });
+      await refreshConnections();
+      setStatus(`已删除文件夹「${folder}」`);
+    } catch (error) {
+      setError(messageOf(error));
+    }
+  }
+
+  /** 打开某个文件夹里的全部连接 */
+  async function openFolderConnections(folder: string) {
+    for (const connection of connectionsRef.current.filter(item => (item.group ?? "") === folder))
+      await openConnectionRef.current(connection, { focusPage: false });
+  }
 
   /** 打开 ER 图：同一个容器已经有图就切过去，不重复开 */
   function openErDiagram(node: SchemaNode) {
@@ -865,6 +968,12 @@ export function App() {
     disconnect, deleteConnection, toggleNode, refreshNode, refreshObjectList, openTableList,
     createTableDraft, exportTableSql, exportDatabaseSql, openTableData, openTableDesign,
     openErDiagram,
+    connectionFolders: settings.connectionFolders,
+    openFolderConnections: folder => void openFolderConnections(folder),
+    createConnectionFolder: () => void createConnectionFolder(),
+    renameConnectionFolder: folder => void renameConnectionFolder(folder),
+    deleteConnectionFolder: folder => void deleteConnectionFolder(folder),
+    moveConnectionToFolder: (name, folder) => void moveConnectionToFolder(name, folder),
     copyDdl, clearTable, dropTable, dropTables,
     openScript, renameScript, deleteScript, openScriptList, createScript, openScriptFile,
     deleteScriptFiles, renameScriptFile, saveActiveScript,
@@ -953,6 +1062,7 @@ export function App() {
             onDesign={openTableDesign}
             onCopyName={node => void writeClipboard(node.label)}
             menuFor={node => buildContextMenu(node, menuContext)}
+            onMoveConnection={moveConnectionToFolder}
           />
         </Panel>
 

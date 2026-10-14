@@ -272,6 +272,37 @@ export function useMonacoEditor(options: UseMonacoEditorOptions) {
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveShortcutRef.current(false));
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyS, () => saveShortcutRef.current(true));
 
+    /*
+     * Ctrl/Cmd + D：把当前行（或选中的整行）向下复制一份，与 IDEA / Navicat 的习惯一致。
+     * Monaco 自带的复制行是 ⇧⌥↓，这里再绑一份 ⌘D；取不到内置动作时用模型编辑兜底。
+     */
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyD, () => {
+      const action = editor.getAction("editor.action.copyLinesDownAction");
+
+      if (action) {
+        void action.run();
+        return;
+      }
+
+      const model = editor.getModel();
+      const selections = editor.getSelections() ?? [];
+
+      if (!model || selections.length === 0)
+        return;
+
+      const edits = selections
+        .map(selection => ({ start: selection.startLineNumber, end: Math.max(selection.endLineNumber, 1) }))
+        .sort((a, b) => b.end - a.end)
+        .map(({ start, end }) => ({
+          range: new monaco.Range(start, 1, end, model.getLineMaxColumn(end)),
+          text: `${model.getValueInRange(new monaco.Range(start, 1, end, model.getLineMaxColumn(end)))}\n`
+        }));
+
+      editor.pushUndoStop();
+      editor.executeEdits("copy-line-down", edits);
+      editor.pushUndoStop();
+    });
+
     /* Ctrl/Cmd + W：智能扩选（按语法单元逐层扩大选区），Shift 版本收缩 */
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyW, () =>
       editor.trigger("keyboard", "editor.action.smartSelect.expand", null));

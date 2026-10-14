@@ -5,6 +5,7 @@ import redis.clients.jedis.commands.ProtocolCommand;
 import valkyrie.driver.api.*;
 import valkyrie.driver.api.exception.DriverException;
 import valkyrie.driver.api.node.DBNode;
+import valkyrie.driver.api.node.DBCatalogNode;
 import valkyrie.driver.api.node.DBNodeKind;
 import valkyrie.driver.api.node.DBNodePath;
 import valkyrie.driver.api.sql.SQL;
@@ -57,14 +58,30 @@ public class RedisDriver extends Driver
                 List<String> catalogs = Lists.newArrayList();
                 int count = Integer.parseInt(jedis.configGet("databases").get("databases"));
 
+                /*
+                 * 所有库都列出来（含空的）：只列非空库会让对象树看起来「少了几层」，
+                 * 而且库总数量本身就是信息；空库在节点上显示 0 条。
+                 */
                 for (int i = 0; i < count; i++) {
-                        jedis.select(i);
-                        long dbSize = jedis.dbSize();
-                        if (dbSize > 0)
-                                catalogs.add(String.valueOf(i));
+                        catalogs.add(String.valueOf(i));
                 }
 
                 return catalogs;
+        }
+
+        /**
+         * 库节点上显示键（数据）条数：Redis 一个库就是一个 {@code DBSIZE}。
+         * 其它节点没有数量概念，返回 {@code null} 让界面不显示。
+         */
+        @Override
+        public synchronized Long getNodeCount(DBNode node)
+        {
+                if (!(node instanceof DBCatalogNode))
+                        return null;
+
+                jedis.select(Integer.parseInt(node.getLabel()));
+
+                return jedis.dbSize();
         }
 
         @Override

@@ -21,11 +21,13 @@ export function SidePanel(props: {
   onDesign: (node: SchemaNode) => void;
   onCopyName: (node: SchemaNode) => void;
   menuFor: (node: SchemaNode) => MenuEntry[];
+  /** 拖动连接归档到文件夹（folder 为 null 表示移出） */
+  onMoveConnection?: (name: string, folder: string | null) => void;
 }) {
   const {
     treeRoot, treeChildren, expanded, loadingNodes, activeNodeId, treeFilter, refreshingConnections,
     onTreeFilterChange, onRefreshConnections, onToggle, onSelect, onActivate, onOpenData, onDesign,
-    onCopyName, menuFor
+    onCopyName, menuFor, onMoveConnection
   } = props;
 
   return (
@@ -69,6 +71,7 @@ export function SidePanel(props: {
         onDesign={onDesign}
         onCopyName={onCopyName}
         menuFor={menuFor}
+        onMoveConnection={onMoveConnection}
       />
     </aside>
   );

@@ -964,6 +964,19 @@ export function ResultGrid(props: ResultGridProps) {
                   if (dragging.current && colMode)
                     setFocus(previous => ({ row: previous?.row ?? 0, col: index }));
                 }}
+                onContextMenu={event => {
+                  /* 右键列头 = 整列：没选中这列时先把整列选上，再弹同一套结果表菜单 */
+                  event.preventDefault();
+
+                  if (!(colMode && bounds && index >= bounds.c1 && index <= bounds.c2)) {
+                    setColMode(true);
+                    setRowMode(false);
+                    setAnchor({ row: 0, col: index });
+                    setFocus({ row: Math.max(0, rows.length - 1), col: index });
+                  }
+
+                  onContextMenu?.();
+                }}
               >
                 <span className="grid-col">
                   {column.primary && <Icon name="key" size={11} className="key-icon" />}
@@ -982,7 +995,15 @@ export function ResultGrid(props: ResultGridProps) {
               </th>
             ))}
             {/* 占位列：把表头背景铺到容器右边缘 */}
-            <th className="grid-filler" aria-hidden="true" />
+            <th
+              className="grid-filler"
+              aria-hidden="true"
+              onContextMenu={event => {
+                /* 表头空白处右键也给菜单，不要只有单元格才有 */
+                event.preventDefault();
+                onContextMenu?.();
+              }}
+            />
           </tr>
         </thead>
         <tbody>

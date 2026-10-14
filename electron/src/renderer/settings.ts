@@ -166,6 +166,8 @@ export interface AppSettings {
   logLimit: number;
   /** 自动化画布：拖动卡片时和其它卡片对齐磁吸（默认关闭） */
   automationSnap: boolean;
+  /** 对象导航里的连接文件夹（含空的，删除连接不会连带删掉文件夹） */
+  connectionFolders: string[];
   /** 启动时最大化窗口 */
   startMaximized: boolean;
 }
@@ -190,6 +192,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   pageSize: 200,
   logLimit: 2048,
   automationSnap: false,
+  connectionFolders: [],
   startMaximized: true
 };
 

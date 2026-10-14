@@ -520,6 +520,19 @@ public abstract class Driver implements SQLExecutor
         }
 
         /**
+         * 节点上要显示的数量：数据库表是行数，Redis 的库是键（数据）条数……
+         * <p>
+         * 默认没有（返回 {@code null}，界面不显示），需要展示的产品自行覆写。
+         *
+         * @param node 对象树节点
+         * @return 数量；没有意义时返回 {@code null}
+         */
+        public Long getNodeCount(DBNode node)
+        {
+                return null;
+        }
+
+        /**
          * 获取指定数据库表的列元信息列表。
          * <p>
          * 根据当前方言的实现，从数据库元数据中提取指定表的所有列的详细信息，

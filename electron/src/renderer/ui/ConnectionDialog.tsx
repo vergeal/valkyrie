@@ -227,6 +227,8 @@ export function ConnectionDialog({ mode, source, initialType, onClose, onSaved }
   function payload(): SavedConnection {
     return {
       name: form.name.trim(),
+      /* 编辑 / 复制时保留它所在的文件夹，否则改一次连接就掉出归档 */
+      group: source?.group,
       type: form.type,
       host: isSqlite ? undefined : form.host.trim(),
       port: isSqlite ? undefined : form.port.trim(),

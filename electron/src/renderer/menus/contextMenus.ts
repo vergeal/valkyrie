@@ -56,6 +56,14 @@ export interface MenuContext {
   openTableDesign: (node: SchemaNode) => void;
   /** 打开 ER 图（按库 / 模式画表关系） */
   openErDiagram: (node: SchemaNode) => void;
+  /** 对象导航里的连接文件夹 */
+  connectionFolders: string[];
+  /** 打开某个文件夹里的全部连接 */
+  openFolderConnections: (folder: string) => void;
+  createConnectionFolder: () => void;
+  renameConnectionFolder: (folder: string) => void;
+  deleteConnectionFolder: (folder: string) => void;
+  moveConnectionToFolder: (name: string, folder: string | null) => void;
   copyDdl: (node: SchemaNode) => void;
   clearTable: (node: SchemaNode) => void;
   dropTable: (node: SchemaNode) => void;
@@ -104,6 +112,7 @@ export function buildContextMenu(node: SchemaNode, ctx: MenuContext): MenuEntry[
 
     return [
       { label: "新建连接", icon: "plus", children: newConnectionMenuEntries(ctx) },
+      { label: "新建文件夹", icon: "folder", action: () => ctx.createConnectionFolder() },
       { label: "新建查询", action: ctx.createQueryTab },
       { label: "新建自动化工作流", icon: "workflow", action: ctx.createAutomationTab },
       { separator: true },
@@ -122,6 +131,29 @@ export function buildContextMenu(node: SchemaNode, ctx: MenuContext): MenuEntry[
     ];
   }
 
+  if (node.kind === "FOLDER") {
+    const inside = ctx.connections.filter(connection => (connection.group ?? "").trim() === node.label);
+
+    return [
+      { label: "新建连接", icon: "plus", children: newConnectionMenuEntries(ctx) },
+      { separator: true },
+      {
+        label: "打开文件夹里的连接",
+        disabled: inside.length === 0,
+        action: () => ctx.openFolderConnections(node.label)
+      },
+      { separator: true },
+      { label: "重命名文件夹…", icon: "pencil", action: () => ctx.renameConnectionFolder(node.label) },
+      {
+        label: "删除文件夹",
+        icon: "trash",
+        danger: true,
+        action: () => ctx.deleteConnectionFolder(node.label)
+      },
+      { label: "刷新连接", action: () => void ctx.refreshConnections() }
+    ];
+  }
+
   if (node.kind === "CONNECTION") {
     /* 连接中或已连接都算「已打开」：连接过程中不再提供「打开连接」，避免开出两个会话 */
     const active = Boolean(node.connected) || ctx.openingConnections.has(node.label);
@@ -133,6 +165,20 @@ export function buildContextMenu(node: SchemaNode, ctx: MenuContext): MenuEntry[
         action: () => void (active ? ctx.disconnect(node.label) : ctx.toggleNode(node))
       },
       { label: "新建查询", action: ctx.createQueryTab },
+      {
+        label: "移动到文件夹",
+        icon: "folder",
+        children: [
+          ...ctx.connectionFolders.map(folder => ({
+            label: (ctx.connections.find(item => item.name === node.label)?.group ?? "") === folder
+              ? `● ${folder}`
+              : folder,
+            action: () => ctx.moveConnectionToFolder(node.label, folder)
+          })),
+          ...(ctx.connectionFolders.length > 0 ? [{ separator: true }] : []),
+          { label: "移出文件夹", disabled: !ctx.connectionFolders.length, action: () => ctx.moveConnectionToFolder(node.label, null) }
+        ]
+      },
       { separator: true },
       { label: "刷新", action: () => void ctx.refreshNode(node) },
       { separator: true },
@@ -443,18 +489,32 @@ export function buildAppMenus(ctx: MenuContext): { label: string; items: MenuEnt
           }
         },
         /*
-         * 粘贴不注册加速键：⌘/Ctrl+V 直接落到渲染层 —— 自动化画布要粘卡片、输入框要原生粘贴，
-         * 注册成菜单加速键的话这个组合键会被菜单吃掉，画布收不到。
+         * 粘贴保留 ⌘/Ctrl+V：Monaco 与输入框的粘贴要靠这条菜单命令触发；
+         * 自动化画布那边收不到被菜单吃掉的按键，所以这里替它转发一次（见下面的 automation-command）。
          */
         {
           label: "粘贴",
+          accelerator: ACCEL.paste,
           action: () => {
             const focused = document.activeElement as HTMLElement | null;
 
-            if (focused?.closest?.(".editor"))
+            if (focused?.closest?.(".editor")) {
               ctx.editorRef.current?.trigger("menu", "editor.action.clipboardPasteAction", null);
-            else
+              return;
+            }
+
+            if (focused?.closest?.("input, textarea, [contenteditable=true]")) {
               void requestPaste();
+              return;
+            }
+
+            /* 自动化画布在前台：让它自己粘卡片 */
+            if (ctx.activeTab?.kind === "workflow") {
+              window.dispatchEvent(new CustomEvent("valkyrie:automation-command", { detail: "paste" }));
+              return;
+            }
+
+            void requestPaste();
           }
         }
       ]

@@ -7,6 +7,8 @@ import type { WorkflowFile, WorkflowFileMeta, WorkflowGraph } from "./automation
 
 export interface SavedConnection {
   name: string;
+  /** 所属文件夹（对象导航里的归档分组）；空表示不在任何文件夹里 */
+  group?: string;
   type: string;
   host?: string;
   port?: string;
@@ -47,7 +49,7 @@ export interface ScriptFile {
   modified: number;
 }
 
-export type NodeKind = "ROOT" | "CONNECTION" | "CATALOG" | "SCHEMA" | "TABLE" | "VIEW" | "TRIGGER" | "COLUMN" | "INDEX" | "FOREIGN_KEY" | "QUERY";
+export type NodeKind = "ROOT" | "FOLDER" | "CONNECTION" | "CATALOG" | "SCHEMA" | "TABLE" | "VIEW" | "TRIGGER" | "COLUMN" | "INDEX" | "FOREIGN_KEY" | "QUERY";
 
 /** 表字段（「字段」分类下的子节点） */
 export interface ColumnMeta {
@@ -92,6 +94,8 @@ export interface SchemaNode {
   foreignKey?: ForeignKeyMeta;
   connected?: boolean;
   badge?: string;
+  /** 节点上要显示的数量：表是行数，Redis 的库是键条数 */
+  count?: number;
   /** 连接节点带上对应的数据库类型，用于显示品牌 logo */
   dbType?: string;
   path?: string;

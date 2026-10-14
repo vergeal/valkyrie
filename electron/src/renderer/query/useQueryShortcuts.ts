@@ -220,6 +220,16 @@ export function useQueryShortcuts(deps: QueryShortcutsDeps) {
         return;
       }
 
+      /*
+       * 编辑器里的 ⌘/Ctrl+V：显式调 Monaco 的粘贴命令。
+       * Chromium 自己不会为可编辑区执行粘贴（要靠菜单命令），所以必须在这里补一手。
+       */
+      if (!shift && key === "v" && target?.closest?.(".editor")) {
+        editorRef.current?.trigger("menu", "editor.action.clipboardPasteAction", null);
+        event.preventDefault();
+        return;
+      }
+
       /* 其余快捷键在编辑器里交给 Monaco，避免同一个动作触发两次 */
       if (target?.closest?.(".editor"))
         return;

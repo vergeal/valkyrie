@@ -24,6 +24,8 @@ export interface SchemaTreeDeps {
   refreshConnectionRoots: (name: string) => Promise<void>;
   showTableList: (node: SchemaNode, options?: { force?: boolean; quiet?: boolean; activate?: boolean; session?: SessionState | null }) => Promise<void>;
   refreshTableList: (tabId: string, container: SchemaNode) => Promise<void>;
+  /** 对象导航里的连接文件夹（含空的） */
+  connectionFolders: string[];
   setError: (message: string | null) => void;
   setStatus: (message: string) => void;
   flash: (text: string) => void;
@@ -37,7 +39,8 @@ export function useSchemaTree(deps: SchemaTreeDeps) {
   const {
     expanded, setExpanded, loadingNodes, setLoadingNodes, activeNode, session, openSessions,
     connections, rootsByConnection, tabs, setTabs, activeTabId, setActiveTabId,
-    openConnection, refreshConnectionRoots, showTableList, refreshTableList, setError, setStatus, flash
+    openConnection, refreshConnectionRoots, showTableList, refreshTableList, setError, setStatus, flash,
+    connectionFolders
   } = deps;
 
   const [childrenMap, setChildrenMap] = useState<Record<string, SchemaNode[]>>({});
@@ -58,25 +61,46 @@ export function useSchemaTree(deps: SchemaTreeDeps) {
   }), []);
 
   const treeChildren = useMemo(() => {
+    /*
+     * 连接文件夹：文件夹本身是界面概念（设置里记住有哪几个，含空的），
+     * 连接挂在哪个文件夹记在连接配置里；这里把两者拼成树的层级。
+     */
+    const groupOf = (connection: SavedConnection) => (connection.group ?? "").trim();
+    const folders = [...new Set([
+      ...connectionFolders.map(name => name.trim()).filter(Boolean),
+      ...connections.map(groupOf).filter(Boolean)
+    ])].sort((left, right) => left.localeCompare(right, "zh-CN"));
+    const connectionNode = (connection: SavedConnection) => ({
+      id: `conn:${connection.name}`,
+      label: connection.name,
+      kind: "CONNECTION" as const,
+      hasChildren: true,
+      /* 多连接并存：凡是开着会话的连接都算已连接 */
+      connected: Boolean(openSessions[connection.name]),
+      dbType: connection.type
+    });
     const merged: Record<string, SchemaNode[]> = {
       ...childrenMap,
-      "conn-root": connections.map(connection => ({
-        id: `conn:${connection.name}`,
-        label: connection.name,
-        kind: "CONNECTION" as const,
-        hasChildren: true,
-        /* 多连接并存：凡是开着会话的连接都算已连接 */
-        connected: Boolean(openSessions[connection.name]),
-        dbType: connection.type
-      }))
+      "conn-root": [
+        ...folders.map(folder => ({
+          id: `folder:${folder}`,
+          label: folder,
+          kind: "FOLDER" as const,
+          hasChildren: true
+        })),
+        ...connections.filter(connection => !groupOf(connection)).map(connectionNode)
+      ]
     };
+
+    for (const folder of folders)
+      merged[`folder:${folder}`] = connections.filter(connection => groupOf(connection) === folder).map(connectionNode);
 
     /* 每个已打开连接各自的数据库列表都挂上去 */
     for (const [name, nodes] of Object.entries(rootsByConnection))
       merged[`conn:${name}`] = nodes;
 
     return merged;
-  }, [childrenMap, connections, rootsByConnection, openSessions]);
+  }, [childrenMap, connections, rootsByConnection, openSessions, connectionFolders]);
 
   function parentTreeNode(id: string): SchemaNode | null {
     return parentTreeNodeHelper(treeRoot, treeChildren, id);
@@ -146,7 +170,8 @@ export function useSchemaTree(deps: SchemaTreeDeps) {
   }
 
   async function toggleNode(node: SchemaNode) {
-    if (node.kind === "ROOT" || (node.kind === "CONNECTION" && node.connected)) {
+    /* 根节点与连接文件夹都是界面自己造的节点，子节点现成，展开只切标记、不去数据层要 */
+    if (node.kind === "ROOT" || node.kind === "FOLDER" || (node.kind === "CONNECTION" && node.connected)) {
       setExpanded(previous => {
         const next = new Set(previous);
 

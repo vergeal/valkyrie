@@ -1415,6 +1415,12 @@ public class RpcServer
                         json.put("schema", nodeSession.schema());
                 }
 
+                /* 节点上要显示的数量：表是行数，Redis 的库是键条数，界面统一画在节点右侧 */
+                Long nodeCount = session.driver.getNodeCount(node);
+
+                if (nodeCount != null)
+                        json.put("count", nodeCount);
+
                 if (node instanceof DBTableNode tableNode) {
                         json.put("table", tableMetaJson(tableNode.getTable()));
                 } else if (node instanceof DBObjectNode objectNode) {

@@ -890,6 +890,29 @@ function AutomationCanvas(props: AutomationEditorProps) {
       actions.selectAll();
   }), []);
 
+  /*
+   * 「编辑 → 粘贴」的 ⌘V 被菜单加速键吃掉，画布这里收不到按键；
+   * 菜单项检测到自动化在前台时会发这个事件，替它把粘卡片接上。
+   */
+  useEffect(() => {
+    const onCommand = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+
+      if (detail === "paste")
+        actionsRef.current.paste();
+      else if (detail === "copy")
+        actionsRef.current.copy();
+      else if (detail === "cut")
+        actionsRef.current.cut();
+      else if (detail === "select-all")
+        actionsRef.current.selectAll();
+    };
+
+    window.addEventListener("valkyrie:automation-command", onCommand);
+
+    return () => window.removeEventListener("valkyrie:automation-command", onCommand);
+  }, []);
+
   /** 画布右键：复制 / 剪切 / 粘贴 / 删除 / 全选 / 适应视图 */
   const openCanvasMenu = () => {
     const actions = actionsRef.current;

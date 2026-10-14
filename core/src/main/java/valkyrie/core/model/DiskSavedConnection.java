@@ -12,6 +12,8 @@ import lombok.Setter;
 public class DiskSavedConnection
 {
         private String name;
+        /** 所属文件夹（对象导航里的归档分组）；空表示不在任何文件夹里 */
+        private String group;
         private String type;
         private String sqlitePath;
         private String host;
