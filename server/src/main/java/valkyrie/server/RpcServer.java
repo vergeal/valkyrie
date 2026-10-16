@@ -108,6 +108,8 @@ public class RpcServer
          * 连接打开期间算好的引擎在这里留一份，断开连接后查询控制台仍能提示表名与字段。
          */
         private final Map<String, SuggestionEngine> suggestionSnapshots = new ConcurrentHashMap<>();
+        /* 正在后台构建补全引擎的库 / 模式：连续敲键时只构建一次 */
+        private final Set<String> buildingSuggestions = ConcurrentHashMap.newKeySet();
         /* 已执行的结果集缓存：编辑、提交、删除都作用在同一个 QueryResult 上 */
         private final Map<Long, QueryResult> resultCache = new ConcurrentHashMap<>();
         private final Map<Long, String> resultOwner = new ConcurrentHashMap<>();
@@ -1231,18 +1233,13 @@ public class RpcServer
 
                         if (engine == null) {
                                 /*
-                                 * 构建要读元数据，偶发（连接池瞬时占用、驱动报错）会抛异常；
-                                 * 不能让整条补全请求跟着失败，退化为该方言关键字，并且不缓存
-                                 * 这份降级结果，下次仍会尝试重建。
+                                 * 引擎要读元数据，远端库第一次可能要好几秒。这里先把该方言的关键字
+                                 * 立刻回给界面（敲键马上有提示），完整引擎丢到后台构建：
+                                 * 下一次补全请求就是「关键字 + 表名 + 字段」的完整候选。
                                  */
-                                try {
-                                        engine = SuggestionEngine.of(session.driver, context);
-                                        suggestionEngines.put(cacheKey, engine);
-                                } catch (Exception e) {
-                                        LOG.warn("补全引擎构建失败，本次退化为关键字: {}", e.getMessage());
-                                        engine = SuggestionEngine.keywords(type);
-                                        cacheable = false;
-                                }
+                                engine = SuggestionEngine.keywords(type);
+                                cacheable = false;
+                                buildSuggestionsInBackground(cacheKey, session, context, type);
                         }
 
                         /* 同步留一份「连接级」快照：连接关闭后查询控制台靠它继续提示 */
@@ -1285,6 +1282,30 @@ public class RpcServer
                 JSONObject ret = new JSONObject();
                 ret.put("suggestions", suggestions);
                 return ret;
+        }
+
+        /**
+         * 后台构建补全引擎：构建期间补全请求先拿关键字顶着，不阻塞敲键。
+         * 同一个库 / 模式只构建一次（连续敲键不会反复触发），失败就下次请求再试。
+         */
+        private void buildSuggestionsInBackground(String cacheKey, OpenConnection session, Session context, String type)
+        {
+                if (!buildingSuggestions.add(cacheKey))
+                        return;
+
+                ThreadPool.taskSubmit(() ->
+                {
+                        try {
+                                SuggestionEngine built = SuggestionEngine.of(session.driver, context);
+
+                                suggestionEngines.put(cacheKey, built);
+                                suggestionSnapshots.put(snapshotKey(session.name, context), built);
+                        } catch (Exception e) {
+                                LOG.warn("后台构建补全引擎失败（本次先用关键字）: {}", e.getMessage());
+                        } finally {
+                                buildingSuggestions.remove(cacheKey);
+                        }
+                });
         }
 
         private Object executeQuery(JSONObject params)

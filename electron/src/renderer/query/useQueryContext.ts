@@ -103,7 +103,9 @@ export function useQueryContext(deps: QueryContextDeps) {
       connection: sameConnection ? consoleSession?.name : (tabConnection ?? consoleSession?.name ?? lastSessionRef.current.name),
       catalog,
       schema: activeSchema,
-      type: sameConnection ? undefined : suggestionType()
+      type: sameConnection ? undefined : suggestionType(),
+      /* 工具栏已经加载过当前库 / 模式的表名，补全兜底时直接拿来用 */
+      tables: tableNodes.map(node => node.label)
     };
   })();
 
