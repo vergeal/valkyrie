@@ -64,6 +64,7 @@ import java.util.Objects;
 import java.util.Deque;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.Executors;
@@ -706,6 +707,9 @@ public class RpcServer
         /* 字段类型字符串高度重复，判断结果缓存起来 */
         private final Map<String, Boolean> numericTypeCache = new ConcurrentHashMap<>();
 
+        /** 结构 DDL 并发数：每次取 DDL 都要连库查元数据，串行在远端库上就是 N 次往返；连接池上限 16，留出余量 */
+        private static final int DUMP_DDL_PARALLELISM = 8;
+
         /** 把若干张表写成一份 SQL 脚本（结构 + 可选数据），返回写入的数据行数 */
         private JSONObject writeSqlDump(Driver driver, Session context, List<String> tables,
                 String path, boolean withData, String token)
@@ -717,94 +721,129 @@ public class RpcServer
                 int rowCount = 0;
                 int total = tables.size();
 
-                /* 先数一遍行数，进度条才是按真实行数走的（不数就只能按表数走，单表会看着像假的） */
-                long totalRows = 0;
+                /*
+                 * 建表语句逐表取，每张表都要连库查一次元数据，几百张表串行下来非常慢。
+                 * 这里先按原顺序把取 DDL 的任务并发提交，写文件时再按原顺序取结果：
+                 * 既并发提速，也不会打乱导出顺序。
+                 */
+                ExecutorService ddlWorkers = Executors.newFixedThreadPool(
+                        Math.min(DUMP_DDL_PARALLELISM, Math.max(1, total)), runnable -> {
+                                Thread thread = new Thread(runnable, "dump-ddl");
+                                thread.setDaemon(true);
+                                return thread;
+                        });
 
-                if (withData) {
-                        for (int index = 0; index < tables.size(); index++) {
-                                String table = tables.get(index);
+                try {
+                        List<Future<String>> ddlTasks = new ArrayList<>(total);
 
-                                exportProgress(token, index, total, table, 0, 0, "count");
-                                totalRows += countRows(driver, dialect, context, table);
+                        for (String table : tables)
+                                ddlTasks.add(ddlWorkers.submit(() -> driver.showCreateTable(context, table)));
+
+                        /* 先数一遍行数，进度条才是按真实行数走的（不数就只能按表数走，单表会看着像假的） */
+                        long totalRows = 0;
+
+                        if (withData) {
+                                for (int index = 0; index < tables.size(); index++) {
+                                        String table = tables.get(index);
+
+                                        exportProgress(token, index, total, table, 0, 0, "count");
+                                        totalRows += countRows(driver, dialect, context, table);
+                                }
                         }
-                }
 
-                exportProgress(token, 0, total, null, 0, totalRows, "dump");
+                        exportProgress(token, 0, total, null, 0, totalRows, "dump");
 
-                /* 边生成边写文件：整库 dump 可能是 GB 级，全部攒进 StringBuilder 会先撑爆内存 */
-                try (BufferedWriter writer = Files.newBufferedWriter(Path.of(path), StandardCharsets.UTF_8)) {
-                        writer.write("-- Valkyrie SQL dump\n");
-                        writer.write("-- 数据库: " + (context.catalog() == null ? "" : context.catalog()));
+                        /* 边生成边写文件：整库 dump 可能是 GB 级，全部攒进 StringBuilder 会先撑爆内存 */
+                        try (BufferedWriter writer = Files.newBufferedWriter(Path.of(path), StandardCharsets.UTF_8)) {
+                                writer.write("-- Valkyrie SQL dump\n");
+                                writer.write("-- 数据库: " + (context.catalog() == null ? "" : context.catalog()));
 
-                        if (context.schema() != null)
-                                writer.write("  模式: " + context.schema());
+                                if (context.schema() != null)
+                                        writer.write("  模式: " + context.schema());
 
-                        writer.write("\n-- 时间: "
-                                + DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now())
-                                + "\n\n");
+                                writer.write("\n-- 时间: "
+                                        + DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now())
+                                        + "\n\n");
 
-                        for (int index = 0; index < tables.size(); index++) {
-                                String table = tables.get(index);
+                                for (int index = 0; index < tables.size(); index++) {
+                                        String table = tables.get(index);
 
-                                exportProgress(token, index, total, table, rowCount, totalRows, "dump");
+                                        exportProgress(token, index, total, table, rowCount, totalRows, "dump");
 
-                                writer.write("-- ----------------------------\n");
-                                writer.write("-- 表结构: " + table + "\n");
-                                writer.write("-- ----------------------------\n");
+                                        writer.write("-- ----------------------------\n");
+                                        writer.write("-- 表结构: " + table + "\n");
+                                        writer.write("-- ----------------------------\n");
 
-                                String ddl = driver.showCreateTable(context, table).trim();
+                                        /* DDL 早已在后台并发取好，这里只等对应那张表的结果 */
+                                        String ddl = awaitDdl(ddlTasks.get(index)).trim();
 
-                                writer.write(ddl);
-                                if (!ddl.endsWith(";"))
-                                        writer.write(';');
+                                        writer.write(ddl);
+                                        if (!ddl.endsWith(";"))
+                                                writer.write(';');
 
-                                writer.write("\n\n");
+                                        writer.write("\n\n");
 
-                                if (withData) {
-                                        writer.write("-- 表数据: " + table + "\n");
+                                        if (withData) {
+                                                writer.write("-- 表数据: " + table + "\n");
 
-                                        List<Column> columns = null;
-                                        int offset = 0;
+                                                List<Column> columns = null;
+                                                int offset = 0;
 
-                                        while (true) {
-                                                QueryResult result = driver.selectByPage(context, table, offset, DUMP_PAGE_SIZE);
-                                                List<GridRow> rows = result.getRows();
+                                                while (true) {
+                                                        QueryResult result = driver.selectByPage(context, table, offset, DUMP_PAGE_SIZE);
+                                                        List<GridRow> rows = result.getRows();
 
-                                                if (columns == null)
-                                                        columns = result.getColumns();
+                                                        if (columns == null)
+                                                                columns = result.getColumns();
 
-                                                for (GridRow row : rows) {
-                                                        writer.write(dumpInsert(dialect, table, columns, row));
-                                                        writer.write('\n');
-                                                        rowCount++;
+                                                        for (GridRow row : rows) {
+                                                                writer.write(dumpInsert(dialect, table, columns, row));
+                                                                writer.write('\n');
+                                                                rowCount++;
+                                                        }
+
+                                                        exportProgress(token, index, total, table, rowCount, totalRows, "dump");
+
+                                                        if (rows.size() < DUMP_PAGE_SIZE)
+                                                                break;
+
+                                                        offset += rows.size();
                                                 }
 
-                                                exportProgress(token, index, total, table, rowCount, totalRows, "dump");
-
-                                                if (rows.size() < DUMP_PAGE_SIZE)
-                                                        break;
-
-                                                offset += rows.size();
+                                                writer.write('\n');
                                         }
 
-                                        writer.write('\n');
+                                        exportProgress(token, index + 1, total, table, rowCount, totalRows, "dump");
                                 }
 
-                                exportProgress(token, index + 1, total, table, rowCount, totalRows, "dump");
+                                /* 收尾：行数可能因精确统计而有出入，明确报一次进度，进度条才会走到 100% */
+                                exportProgress(token, total, total, null, rowCount, Math.max(totalRows, rowCount), "dump");
+                        } catch (Exception e) {
+                                throw new CoreException(e);
                         }
 
-                        /* 收尾：行数可能因精确统计而有出入，明确报一次进度，进度条才会走到 100% */
-                        exportProgress(token, total, total, null, rowCount, Math.max(totalRows, rowCount), "dump");
-                } catch (Exception e) {
-                        throw new CoreException(e);
+                        JSONObject ret = new JSONObject();
+                        ret.put("path", path);
+                        ret.put("tables", tables.size());
+                        ret.put("rows", rowCount);
+
+                        return ret;
+                } finally {
+                        ddlWorkers.shutdownNow();
                 }
+        }
 
-                JSONObject ret = new JSONObject();
-                ret.put("path", path);
-                ret.put("tables", tables.size());
-                ret.put("rows", rowCount);
-
-                return ret;
+        /** 取后台并发任务的建表语句：中断或任务失败都让导出整体失败，避免写出半张表的脚本 */
+        private String awaitDdl(Future<String> task)
+        {
+                try {
+                        return task.get();
+                } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new CoreException(e);
+                } catch (ExecutionException e) {
+                        throw new CoreException(e.getCause() instanceof Exception cause ? cause : e);
+                }
         }
 
         /** 统计表行数用于进度条分母；失败返回 0（不影响导出，只是该表不参与百分比） */
